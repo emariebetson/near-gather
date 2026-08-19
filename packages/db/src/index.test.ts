@@ -84,12 +84,31 @@ describe("@neargather/db", () => {
       /create trigger invitation_state_history_append_only\s+before update or delete on neargather\.invitation_state_history/i
     );
     expect(migrationSql).toMatch(
-      /create table neargather\.transactional_outbox[\s\S]*lease_token text[\s\S]*lease_expires_at timestamptz[\s\S]*published_at timestamptz/i
+      /create table neargather\.transactional_outbox[\s\S]*lease_token text[\s\S]*lease_expires_at timestamptz[\s\S]*published_at timestamptz[\s\S]*dead_lettered_at timestamptz[\s\S]*dead_letter_reason text/i
     );
     expect(migrationSql).toMatch(/semantic_idempotency_key text not null unique/i);
     expect(migrationSql).toMatch(
       /create table neargather\.provider_inbound_messages[\s\S]*provider_message_id text not null unique/i
     );
     expect(migrationSql).toMatch(/create table neargather\.deletion_tombstones/i);
+  });
+
+  it("models terminal outbox failure separately from successful publication in schema metadata", () => {
+    const exported = db as Record<string, unknown>;
+    const schema = exported.nearGatherSchema as {
+      tables: {
+        transactionalOutbox: {
+          columns: readonly { name: string; nullable?: boolean; type: string }[];
+        };
+      };
+    };
+
+    expect(schema.tables.transactionalOutbox.columns).toEqual(
+      expect.arrayContaining([
+        { name: "published_at", nullable: true, type: "timestamptz" },
+        { name: "dead_lettered_at", nullable: true, type: "timestamptz" },
+        { name: "dead_letter_reason", nullable: true, type: "text" }
+      ])
+    );
   });
 });

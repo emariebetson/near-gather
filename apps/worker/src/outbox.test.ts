@@ -150,12 +150,18 @@ describe("@neargather/worker outbox consumer", () => {
 
     expect(repository.snapshot().deadLetters).toEqual([
       expect.objectContaining({
+        deadLetteredAt: "2026-08-19T14:00:00.000Z",
         lastError: "provider rejected destination",
         outboxId: "outbox-1",
         semanticIdempotencyKey: "delivery:terminal",
         topic: "delivery.send"
       })
     ]);
+    expect(repository.snapshot().messages[0]).toMatchObject({
+      deadLetterReason: "provider rejected destination",
+      deadLetteredAt: "2026-08-19T14:00:00.000Z",
+      publishedAt: null
+    });
   });
 
   it("processes deletion propagation jobs against object storage", async () => {

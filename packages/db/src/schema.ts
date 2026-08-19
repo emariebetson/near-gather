@@ -258,6 +258,8 @@ create table neargather.transactional_outbox (
   leased_at timestamptz,
   lease_expires_at timestamptz,
   published_at timestamptz,
+  dead_lettered_at timestamptz,
+  dead_letter_reason text,
   attempt_count integer not null default 0,
   last_error text,
   created_at timestamptz not null default now(),
@@ -533,6 +535,8 @@ export interface TransactionalOutboxMessage {
 
 export interface LeasedOutboxMessage extends TransactionalOutboxMessage {
   attemptCount: number;
+  deadLetterReason: string | null;
+  deadLetteredAt: string | null;
   lastError: string | null;
   leaseExpiresAt: string | null;
   leasedAt: string | null;
@@ -716,7 +720,9 @@ export const nearGatherSchema = {
         { name: "lease_token", nullable: true, type: "text" },
         { name: "leased_at", nullable: true, type: "timestamptz" },
         { name: "lease_expires_at", nullable: true, type: "timestamptz" },
-        { name: "published_at", nullable: true, type: "timestamptz" }
+        { name: "published_at", nullable: true, type: "timestamptz" },
+        { name: "dead_lettered_at", nullable: true, type: "timestamptz" },
+        { name: "dead_letter_reason", nullable: true, type: "text" }
       ],
       name: "neargather.transactional_outbox",
       primaryKey: ["outbox_id"],

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createStubByteSignatureValidator,
   createInMemoryMediaRepository,
   createInMemoryObjectStorage,
   createManualClock,
@@ -14,7 +15,9 @@ describe("@neargather/providers media lifecycle", () => {
     const clock = createManualClock("2026-08-19T16:00:00.000Z");
     const repository = createInMemoryMediaRepository();
     const service = createMediaLifecycleService({
+      byteSignatureValidator: createStubByteSignatureValidator(),
       clock,
+      maxUploadBytes: 2_048,
       objectStorage: createInMemoryObjectStorage(),
       repository,
       scanner: createStubScanner(),
@@ -61,7 +64,9 @@ describe("@neargather/providers media lifecycle", () => {
     const objectStorage = createInMemoryObjectStorage();
     const repository = createInMemoryMediaRepository();
     const service = createMediaLifecycleService({
+      byteSignatureValidator: createStubByteSignatureValidator(),
       clock,
+      maxUploadBytes: 2_048,
       objectStorage,
       repository,
       scanner: createStubScanner(),
@@ -87,8 +92,11 @@ describe("@neargather/providers media lifecycle", () => {
 
     await expect(
       service.finalizeUpload({
+        eventId: "event-1",
+        invitationId: "invitation-1",
         mediaId: "media-1",
-        objectKey: "uploads/media-1/original.jpg"
+        objectKey: "uploads/media-1/original.jpg",
+        singleUseToken: repository.get("media-1")!.singleUseToken
       })
     ).resolves.toMatchObject({
       reason: "CHECKSUM_MISMATCH",
@@ -106,7 +114,9 @@ describe("@neargather/providers media lifecycle", () => {
     const objectStorage = createInMemoryObjectStorage();
     const repository = createInMemoryMediaRepository();
     const service = createMediaLifecycleService({
+      byteSignatureValidator: createStubByteSignatureValidator(),
       clock,
+      maxUploadBytes: 2_048,
       objectStorage,
       repository,
       scanner: createStubScanner(),
@@ -131,8 +141,11 @@ describe("@neargather/providers media lifecycle", () => {
 
     await expect(
       service.finalizeUpload({
+        eventId: "event-1",
+        invitationId: "invitation-1",
         mediaId: "media-1",
-        objectKey: "uploads/media-1/original.jpg"
+        objectKey: "uploads/media-1/original.jpg",
+        singleUseToken: repository.get("media-1")!.singleUseToken
       })
     ).resolves.toMatchObject({
       qualifiesForRsvp: true,
@@ -171,7 +184,9 @@ describe("@neargather/providers media lifecycle", () => {
       ]
     });
     const service = createMediaLifecycleService({
+      byteSignatureValidator: createStubByteSignatureValidator(),
       clock,
+      maxUploadBytes: 2_048,
       objectStorage,
       repository,
       scanner: createStubScanner(),
@@ -196,8 +211,11 @@ describe("@neargather/providers media lifecycle", () => {
 
     await expect(
       service.finalizeUpload({
+        eventId: "event-1",
+        invitationId: "invitation-1",
         mediaId: "media-1",
-        objectKey: "uploads/media-1/original.jpg"
+        objectKey: "uploads/media-1/original.jpg",
+        singleUseToken: repository.get("media-1")!.singleUseToken
       })
     ).resolves.toMatchObject({
       qualifiesForRsvp: false,
@@ -211,8 +229,11 @@ describe("@neargather/providers media lifecycle", () => {
 
     await expect(
       service.finalizeUpload({
+        eventId: "event-1",
+        invitationId: "invitation-1",
         mediaId: "media-1",
-        objectKey: "uploads/media-1/original.jpg"
+        objectKey: "uploads/media-1/original.jpg",
+        singleUseToken: repository.get("media-1")!.singleUseToken
       })
     ).resolves.toMatchObject({
       qualifiesForRsvp: true,
@@ -221,12 +242,212 @@ describe("@neargather/providers media lifecycle", () => {
 
     await expect(
       service.finalizeUpload({
+        eventId: "event-1",
+        invitationId: "invitation-1",
         mediaId: "media-1",
-        objectKey: "uploads/media-1/original.jpg"
+        objectKey: "uploads/media-1/original.jpg",
+        singleUseToken: repository.get("media-1")!.singleUseToken
       })
     ).resolves.toMatchObject({
-      qualifiesForRsvp: true,
-      status: "READY"
+      reason: "FINALIZE_TOKEN_REPLAY",
+      status: "REJECTED"
+    });
+  });
+
+  it("requires an unexpired single-use token scoped to the current media grant", async () => {
+    const clock = createManualClock("2026-08-19T20:00:00.000Z");
+    const objectStorage = createInMemoryObjectStorage();
+    const repository = createInMemoryMediaRepository();
+    const service = createMediaLifecycleService({
+      byteSignatureValidator: createStubByteSignatureValidator(),
+      clock,
+      maxUploadBytes: 2_048,
+      objectStorage,
+      repository,
+      scanner: createStubScanner(),
+      transcoder: createStubTranscoder()
+    });
+
+    await service.issueUploadGrant({
+      checksumSha256: "checksum-1",
+      contentType: "image/jpeg",
+      eventId: "event-1",
+      invitationId: "invitation-1",
+      mediaId: "media-1",
+      objectKey: "uploads/media-1/original.jpg",
+      sizeBytes: 512
+    });
+    objectStorage.putObject({
+      checksumSha256: "checksum-1",
+      contentType: "image/jpeg",
+      objectKey: "uploads/media-1/original.jpg",
+      sizeBytes: 512
+    });
+
+    await expect(
+      service.finalizeUpload({
+        eventId: "event-1",
+        invitationId: "invitation-1",
+        mediaId: "media-1",
+        objectKey: "uploads/media-1/original.jpg",
+        singleUseToken: ""
+      })
+    ).resolves.toMatchObject({
+      reason: "FINALIZE_TOKEN_REQUIRED",
+      status: "REJECTED"
+    });
+
+    await expect(
+      service.finalizeUpload({
+        eventId: "event-2",
+        invitationId: "invitation-1",
+        mediaId: "media-1",
+        objectKey: "uploads/media-1/original.jpg",
+        singleUseToken: repository.get("media-1")!.singleUseToken
+      })
+    ).resolves.toMatchObject({
+      reason: "FINALIZE_TOKEN_SCOPE_MISMATCH",
+      status: "REJECTED"
+    });
+
+    clock.advanceSeconds(301);
+
+    await expect(
+      service.finalizeUpload({
+        eventId: "event-1",
+        invitationId: "invitation-1",
+        mediaId: "media-1",
+        objectKey: "uploads/media-1/original.jpg",
+        singleUseToken: repository.get("media-1")!.singleUseToken
+      })
+    ).resolves.toMatchObject({
+      reason: "FINALIZE_TOKEN_EXPIRED",
+      status: "REJECTED"
+    });
+  });
+
+  it("rejects reissued grants that drift from the original pending upload scope", async () => {
+    const clock = createManualClock("2026-08-19T21:00:00.000Z");
+    const repository = createInMemoryMediaRepository();
+    const service = createMediaLifecycleService({
+      byteSignatureValidator: createStubByteSignatureValidator(),
+      clock,
+      maxUploadBytes: 2_048,
+      objectStorage: createInMemoryObjectStorage(),
+      repository,
+      scanner: createStubScanner(),
+      transcoder: createStubTranscoder()
+    });
+
+    const initialGrant = await service.issueUploadGrant({
+      checksumSha256: "checksum-1",
+      contentType: "image/jpeg",
+      eventId: "event-1",
+      invitationId: "invitation-1",
+      mediaId: "media-1",
+      objectKey: "uploads/media-1/original.jpg",
+      sizeBytes: 512
+    });
+
+    await expect(
+      service.issueUploadGrant({
+        checksumSha256: "checksum-2",
+        contentType: "image/jpeg",
+        eventId: "event-1",
+        invitationId: "invitation-1",
+        mediaId: "media-1",
+        objectKey: "uploads/media-1/original.jpg",
+        sizeBytes: 512
+      })
+    ).rejects.toThrow("Reissued upload grants must preserve the original upload scope.");
+
+    await expect(
+      service.issueUploadGrant({
+        checksumSha256: "checksum-1",
+        contentType: "image/jpeg",
+        eventId: "event-2",
+        invitationId: "invitation-1",
+        mediaId: "media-1",
+        objectKey: "uploads/media-1/original.jpg",
+        sizeBytes: 512
+      })
+    ).rejects.toThrow("Reissued upload grants must preserve the original upload scope.");
+
+    expect(repository.get("media-1")?.singleUseToken).toBe(initialGrant.singleUseToken);
+  });
+
+  it("rejects oversize uploads and byte-signature mismatches before scanning or transcoding", async () => {
+    const clock = createManualClock("2026-08-19T22:00:00.000Z");
+    const objectStorage = createInMemoryObjectStorage();
+    const repository = createInMemoryMediaRepository();
+    const service = createMediaLifecycleService({
+      byteSignatureValidator: createStubByteSignatureValidator({
+        nextResults: [{ matchesDeclaredType: false, supported: true }]
+      }),
+      clock,
+      maxUploadBytes: 1_024,
+      objectStorage,
+      repository,
+      scanner: createStubScanner(),
+      transcoder: createStubTranscoder()
+    });
+
+    await service.issueUploadGrant({
+      checksumSha256: "checksum-1",
+      contentType: "image/jpeg",
+      eventId: "event-1",
+      invitationId: "invitation-1",
+      mediaId: "media-1",
+      objectKey: "uploads/media-1/original.jpg",
+      sizeBytes: 2_048
+    });
+    objectStorage.putObject({
+      checksumSha256: "checksum-1",
+      contentType: "image/jpeg",
+      objectKey: "uploads/media-1/original.jpg",
+      sizeBytes: 2_048
+    });
+
+    await expect(
+      service.finalizeUpload({
+        eventId: "event-1",
+        invitationId: "invitation-1",
+        mediaId: "media-1",
+        objectKey: "uploads/media-1/original.jpg",
+        singleUseToken: repository.get("media-1")!.singleUseToken
+      })
+    ).resolves.toMatchObject({
+      reason: "MAX_SIZE_EXCEEDED",
+      status: "REJECTED"
+    });
+
+    await service.issueUploadGrant({
+      checksumSha256: "checksum-2",
+      contentType: "image/jpeg",
+      eventId: "event-1",
+      invitationId: "invitation-1",
+      mediaId: "media-2",
+      objectKey: "uploads/media-2/original.jpg",
+      sizeBytes: 512
+    });
+    objectStorage.putObject({
+      checksumSha256: "checksum-2",
+      contentType: "image/jpeg",
+      objectKey: "uploads/media-2/original.jpg",
+      sizeBytes: 512
+    });
+
+    await expect(
+      service.finalizeUpload({
+        eventId: "event-1",
+        invitationId: "invitation-1",
+        mediaId: "media-2",
+        objectKey: "uploads/media-2/original.jpg",
+        singleUseToken: repository.get("media-2")!.singleUseToken
+      })
+    ).resolves.toMatchObject({
+      reason: "DECLARED_TYPE_MISMATCH",
+      status: "REJECTED"
     });
   });
 });

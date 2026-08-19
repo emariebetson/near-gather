@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 export interface Clock {
   now(): string;
 }
@@ -16,6 +18,12 @@ export type MediaStatus =
 export type MediaRejectionReason =
   | "CHECKSUM_MISMATCH"
   | "CONTENT_TYPE_MISMATCH"
+  | "DECLARED_TYPE_MISMATCH"
+  | "FINALIZE_TOKEN_EXPIRED"
+  | "FINALIZE_TOKEN_REPLAY"
+  | "FINALIZE_TOKEN_REQUIRED"
+  | "FINALIZE_TOKEN_SCOPE_MISMATCH"
+  | "MAX_SIZE_EXCEEDED"
   | "MALWARE_DETECTED"
   | "MISSING_OBJECT"
   | "SIZE_MISMATCH"
@@ -33,10 +41,12 @@ export interface MediaRecord {
   invitationId: string;
   mediaId: string;
   objectKey: string;
+  replayedFinalizeTokenIds: readonly string[];
   rejectionReason: MediaRejectionReason | null;
   singleUseToken: string;
   sizeBytes: number;
   status: MediaStatus;
+  tokenConsumedAt: string | null;
 }
 
 export interface StoredObject {
@@ -55,6 +65,21 @@ export interface ScannerPort {
     checksumSha256: string;
     objectKey: string;
   }): Promise<{ reason?: string; safe: boolean }> | { reason?: string; safe: boolean };
+}
+
+export interface ByteSignatureValidationPort {
+  validate(input: {
+    contentType: string;
+    objectKey: string;
+  }):
+    | Promise<{
+        matchesDeclaredType: boolean;
+        supported: boolean;
+      }>
+    | {
+        matchesDeclaredType: boolean;
+        supported: boolean;
+      };
 }
 
 export interface TranscoderPort {
@@ -114,7 +139,9 @@ export type FinalizeUploadResult =
     };
 
 export interface CreateMediaLifecycleServiceInput {
+  byteSignatureValidator: ByteSignatureValidationPort;
   clock: Clock;
+  maxUploadBytes: number;
   objectStorage: ObjectStoragePort;
   repository: MediaRepository;
   scanner: ScannerPort;
@@ -179,6 +206,21 @@ export function createStubScanner(result?: {
   };
 }
 
+export function createStubByteSignatureValidator(input?: {
+  nextResults?: readonly {
+    matchesDeclaredType: boolean;
+    supported: boolean;
+  }[];
+}): ByteSignatureValidationPort {
+  const queuedResults = [...(input?.nextResults ?? [])];
+
+  return {
+    validate() {
+      return queuedResults.shift() ?? { matchesDeclaredType: true, supported: true };
+    }
+  };
+}
+
 export function createStubTranscoder(input?: {
   nextDerivativeStates?: readonly {
     derivativeKey: string;
@@ -207,8 +249,11 @@ export function createStubTranscoder(input?: {
 
 export function createMediaLifecycleService(input: CreateMediaLifecycleServiceInput): {
   finalizeUpload(args: {
+    eventId: string;
+    invitationId: string;
     mediaId: string;
     objectKey: string;
+    singleUseToken: string;
   }): Promise<FinalizeUploadResult>;
   issueUploadGrant(args: IssueUploadGrantInput): Promise<UploadGrant>;
 } {
@@ -224,12 +269,32 @@ export function createMediaLifecycleService(input: CreateMediaLifecycleServiceIn
         throw new Error("Upload finalization is single-object scoped.");
       }
 
-      if (existing.status === "READY") {
-        return {
-          derivativeKey: existing.derivativeKey ?? buildDerivativeKey(existing.objectKey),
-          qualifiesForRsvp: true,
-          status: "READY"
+      if (args.singleUseToken.length === 0) {
+        return rejectUpload(input.repository, existing, "FINALIZE_TOKEN_REQUIRED");
+      }
+
+      if (
+        existing.eventId !== args.eventId ||
+        existing.invitationId !== args.invitationId ||
+        existing.singleUseToken !== args.singleUseToken
+      ) {
+        return rejectUpload(input.repository, existing, "FINALIZE_TOKEN_SCOPE_MISMATCH");
+      }
+
+      if (new Date(input.clock.now()).valueOf() > new Date(existing.grantExpiresAt).valueOf()) {
+        return rejectUpload(input.repository, existing, "FINALIZE_TOKEN_EXPIRED");
+      }
+
+      if (existing.tokenConsumedAt) {
+        const replayRecord: MediaRecord = {
+          ...existing,
+          replayedFinalizeTokenIds: [
+            ...existing.replayedFinalizeTokenIds,
+            args.singleUseToken
+          ]
         };
+        await input.repository.save(replayRecord);
+        return rejectUpload(input.repository, replayRecord, "FINALIZE_TOKEN_REPLAY");
       }
 
       if (existing.status === "REJECTED") {
@@ -250,6 +315,10 @@ export function createMediaLifecycleService(input: CreateMediaLifecycleServiceIn
         return rejectUpload(input.repository, existing, "ZERO_BYTE_OBJECT");
       }
 
+      if (storedObject.sizeBytes > input.maxUploadBytes) {
+        return rejectUpload(input.repository, existing, "MAX_SIZE_EXCEEDED");
+      }
+
       if (storedObject.sizeBytes !== existing.sizeBytes) {
         return rejectUpload(input.repository, existing, "SIZE_MISMATCH");
       }
@@ -260,6 +329,19 @@ export function createMediaLifecycleService(input: CreateMediaLifecycleServiceIn
 
       if (storedObject.checksumSha256 !== existing.checksumSha256) {
         return rejectUpload(input.repository, existing, "CHECKSUM_MISMATCH");
+      }
+
+      const byteSignature = await input.byteSignatureValidator.validate({
+        contentType: storedObject.contentType,
+        objectKey: storedObject.objectKey
+      });
+
+      if (!byteSignature.matchesDeclaredType) {
+        return rejectUpload(input.repository, existing, "DECLARED_TYPE_MISMATCH");
+      }
+
+      if (!byteSignature.supported) {
+        return rejectUpload(input.repository, existing, "UNSUPPORTED_CODEC");
       }
 
       const quarantinedRecord: MediaRecord = {
@@ -305,7 +387,8 @@ export function createMediaLifecycleService(input: CreateMediaLifecycleServiceIn
         derivativeKey: derivative.derivativeKey,
         finalizationFingerprint: buildFinalizationFingerprint(storedObject),
         rejectionReason: null,
-        status: "READY"
+        status: "READY",
+        tokenConsumedAt: acceptedAt
       });
 
       return {
@@ -325,6 +408,18 @@ export function createMediaLifecycleService(input: CreateMediaLifecycleServiceIn
         throw new Error("Upload grants are single-object scoped.");
       }
 
+      if (
+        current &&
+        (current.eventId !== args.eventId ||
+          current.invitationId !== args.invitationId ||
+          current.checksumSha256 !== args.checksumSha256 ||
+          current.contentType !== args.contentType ||
+          current.sizeBytes !== args.sizeBytes ||
+          current.objectKey !== args.objectKey)
+      ) {
+        throw new Error("Reissued upload grants must preserve the original upload scope.");
+      }
+
       const issuedAt = new Date(input.clock.now()).valueOf();
       const expiresAt = new Date(issuedAt + 5 * 60 * 1000).toISOString();
       const nextRecord: MediaRecord = {
@@ -338,10 +433,12 @@ export function createMediaLifecycleService(input: CreateMediaLifecycleServiceIn
         invitationId: args.invitationId,
         mediaId: args.mediaId,
         objectKey: args.objectKey,
+        replayedFinalizeTokenIds: current?.replayedFinalizeTokenIds ?? [],
         rejectionReason: current?.rejectionReason ?? null,
-        singleUseToken: `${args.mediaId}:${issuedAt}`,
+        singleUseToken: randomBytes(24).toString("hex"),
         sizeBytes: args.sizeBytes,
-        status: current?.status === "QUARANTINED" ? "QUARANTINED" : "UPLOADING"
+        status: current?.status === "QUARANTINED" ? "QUARANTINED" : "UPLOADING",
+        tokenConsumedAt: null
       };
 
       await input.repository.save(nextRecord);

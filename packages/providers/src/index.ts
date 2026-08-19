@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export {
+  type ByteSignatureValidationPort,
   type Clock,
   type FinalizeUploadResult,
   type IssueUploadGrantInput,
@@ -12,6 +13,7 @@ export {
   type StoredObject,
   type TranscoderPort,
   type UploadGrant,
+  createStubByteSignatureValidator,
   createInMemoryMediaRepository,
   createInMemoryObjectStorage,
   createManualClock,

@@ -240,6 +240,8 @@ create table neargather.transactional_outbox (
   leased_at timestamptz,
   lease_expires_at timestamptz,
   published_at timestamptz,
+  dead_lettered_at timestamptz,
+  dead_letter_reason text,
   attempt_count integer not null default 0,
   last_error text,
   created_at timestamptz not null default now(),

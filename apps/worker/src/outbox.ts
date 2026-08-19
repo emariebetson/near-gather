@@ -18,6 +18,8 @@ export interface OutboxMessage {
 
 export interface LeasedOutboxMessage extends OutboxMessage {
   attemptCount: number;
+  deadLetterReason: string | null;
+  deadLetteredAt: string | null;
   lastError: string | null;
   leaseExpiresAt: string | null;
   leasedAt: string | null;
@@ -118,6 +120,8 @@ export function createInMemoryOutboxRepository(
   const storedMessages: LeasedOutboxMessage[] = messages.map((message) => ({
     ...message,
     attemptCount: 0,
+    deadLetterReason: null,
+    deadLetteredAt: null,
     lastError: null,
     leaseExpiresAt: null,
     leasedAt: null,
@@ -162,6 +166,8 @@ export function createInMemoryOutboxRepository(
     async markPublished(input) {
       const message = requireLeaseMatch(storedMessages, input.outboxId, input.leaseToken);
       message.publishedAt = input.publishedAt;
+      message.deadLetterReason = null;
+      message.deadLetteredAt = null;
       message.lastError = null;
       clearLease(message);
       processedSemanticKeys.add(message.semanticIdempotencyKey);
@@ -169,7 +175,8 @@ export function createInMemoryOutboxRepository(
     async recordDeadLetter(input) {
       const message = requireLeaseMatch(storedMessages, input.outboxId, input.leaseToken);
       message.lastError = input.lastError;
-      message.publishedAt = input.deadLetteredAt;
+      message.deadLetterReason = input.lastError;
+      message.deadLetteredAt = input.deadLetteredAt;
       clearLease(message);
       processedSemanticKeys.add(message.semanticIdempotencyKey);
       deadLetters.push({
