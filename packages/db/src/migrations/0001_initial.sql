@@ -11,6 +11,114 @@ create type neargather.rsvp_state as enum (
   'EXEMPT_COMPLETE'
 );
 
+create table neargather.events (
+  event_id text primary key,
+  organizer_id text not null,
+  event_type neargather.event_type not null,
+  birthday_format neargather.birthday_format,
+  minor_subject_present boolean not null default false,
+  lifecycle text not null default 'DRAFT',
+  timezone text not null,
+  event_date date not null,
+  intake_close_at timestamptz,
+  created_at timestamptz not null default now(),
+  check ((event_type = 'BIRTHDAY' and birthday_format is not null) or (event_type <> 'BIRTHDAY' and birthday_format is null))
+);
+
+create table neargather.honorees (
+  event_id text not null,
+  honoree_id text not null,
+  display_name text not null,
+  age_category text not null check (age_category in ('ADULT', 'MINOR')),
+  milestone_label text,
+  primary key (event_id, honoree_id),
+  foreign key (event_id) references neargather.events (event_id)
+);
+
+create table neargather.invitations (
+  event_id text not null,
+  invitation_id text not null,
+  primary_guest_id text,
+  lifecycle text not null default 'ACTIVE',
+  created_at timestamptz not null default now(),
+  primary key (event_id, invitation_id),
+  foreign key (event_id) references neargather.events (event_id)
+);
+
+create table neargather.guests (
+  event_id text not null,
+  invitation_id text not null,
+  guest_id text not null,
+  display_name text not null,
+  adult_actor_eligible boolean not null default true,
+  primary key (event_id, invitation_id, guest_id),
+  foreign key (event_id, invitation_id) references neargather.invitations (event_id, invitation_id)
+);
+
+create table neargather.guest_contacts (
+  event_id text not null,
+  invitation_id text not null,
+  contact_id text not null,
+  guest_id text,
+  normalized_phone text,
+  normalized_email text,
+  is_active boolean not null default true,
+  primary key (event_id, invitation_id, contact_id),
+  unique (event_id, normalized_phone),
+  foreign key (event_id, invitation_id) references neargather.invitations (event_id, invitation_id),
+  foreign key (event_id, invitation_id, guest_id) references neargather.guests (event_id, invitation_id, guest_id),
+  check (normalized_phone is not null or normalized_email is not null)
+);
+
+create table neargather.prompts (
+  event_id text not null,
+  prompt_id text not null,
+  prompt_kind text not null check (prompt_kind in ('RSVP_GATE', 'EVENT')),
+  prompt_version integer not null default 1,
+  active boolean not null default true,
+  primary key (event_id, prompt_id),
+  foreign key (event_id) references neargather.events (event_id)
+);
+
+create unique index one_active_rsvp_gate_prompt
+  on neargather.prompts (event_id)
+  where prompt_kind = 'RSVP_GATE' and active;
+
+create table neargather.contributions (
+  event_id text not null,
+  invitation_id text not null,
+  contribution_id text not null,
+  prompt_id text not null,
+  submitted_by_actor_id text not null,
+  contribution_kind text not null check (contribution_kind in ('TEXT', 'AUDIO', 'VIDEO', 'PHOTO')),
+  acceptance_status text not null default 'PENDING',
+  availability_status text not null default 'AVAILABLE',
+  idempotency_key text not null,
+  accepted_at timestamptz,
+  removed_at timestamptz,
+  primary key (event_id, invitation_id, contribution_id),
+  unique (event_id, idempotency_key),
+  foreign key (event_id, invitation_id) references neargather.invitations (event_id, invitation_id),
+  foreign key (event_id, prompt_id) references neargather.prompts (event_id, prompt_id)
+);
+
+create table neargather.media_assets (
+  event_id text not null,
+  invitation_id text not null,
+  asset_id text not null,
+  contribution_id text not null,
+  uploader_actor_id text not null,
+  object_key text not null,
+  checksum_sha256 text not null,
+  size_bytes bigint not null check (size_bytes > 0),
+  detected_mime text,
+  processing_status text not null default 'UPLOADING',
+  visibility text not null default 'HOST_ONLY',
+  primary key (event_id, invitation_id, asset_id),
+  unique (event_id, object_key),
+  foreign key (event_id, invitation_id, contribution_id) references neargather.contributions (event_id, invitation_id, contribution_id)
+);
+
 create table neargather.accepted_contributions (
   event_id text not null,
   invitation_id text not null,
@@ -19,6 +127,10 @@ create table neargather.accepted_contributions (
   accepted_at timestamptz not null,
   primary key (event_id, invitation_id, contribution_id)
 );
+
+alter table neargather.accepted_contributions
+  add foreign key (event_id, invitation_id, contribution_id)
+  references neargather.contributions (event_id, invitation_id, contribution_id);
 
 create table neargather.organizer_exemption_audits (
   event_id text not null,
@@ -329,59 +441,106 @@ alter table neargather.data_rights_requests enable row level security;
 alter table neargather.provider_inbound_messages enable row level security;
 alter table neargather.transactional_outbox enable row level security;
 alter table neargather.deletion_tombstones enable row level security;
+alter table neargather.events enable row level security;
+alter table neargather.honorees enable row level security;
+alter table neargather.invitations enable row level security;
+alter table neargather.guests enable row level security;
+alter table neargather.guest_contacts enable row level security;
+alter table neargather.prompts enable row level security;
+alter table neargather.contributions enable row level security;
+alter table neargather.media_assets enable row level security;
+
+create policy events_event_scope on neargather.events
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
+create policy honorees_event_scope on neargather.honorees
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
+create policy invitations_event_scope on neargather.invitations
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
+create policy guests_event_scope on neargather.guests
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
+create policy guest_contacts_event_scope on neargather.guest_contacts
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
+create policy prompts_event_scope on neargather.prompts
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
+create policy contributions_event_scope on neargather.contributions
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
+create policy media_assets_event_scope on neargather.media_assets
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy invitation_states_event_scope
   on neargather.invitation_states
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy invitation_state_history_event_scope
   on neargather.invitation_state_history
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy adult_actor_assurance_receipts_event_scope
   on neargather.adult_actor_assurance_receipts
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy guardian_authority_records_event_scope
   on neargather.guardian_authority_records
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy on_behalf_disclosure_receipts_event_scope
   on neargather.on_behalf_disclosure_receipts
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy processing_notice_receipts_event_scope
   on neargather.processing_notice_receipts
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy consent_grants_event_scope
   on neargather.consent_grants
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy media_license_receipts_event_scope
   on neargather.media_license_receipts
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy opt_out_events_event_scope
   on neargather.opt_out_events
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy messaging_suppressions_event_scope
   on neargather.messaging_suppressions
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy data_rights_requests_event_scope
   on neargather.data_rights_requests
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy provider_inbound_messages_event_scope
   on neargather.provider_inbound_messages
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy transactional_outbox_event_scope
   on neargather.transactional_outbox
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));
 
 create policy deletion_tombstones_event_scope
   on neargather.deletion_tombstones
-  using (event_id = current_setting('neargather.event_id', true));
+  using (event_id = current_setting('neargather.event_id', true))
+  with check (event_id = current_setting('neargather.event_id', true));

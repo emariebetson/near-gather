@@ -23,6 +23,10 @@ describe("@neargather/db", () => {
         rsvpState: { values: readonly string[] };
       };
       tables: {
+        events: { primaryKey: readonly string[] };
+        honorees: { primaryKey: readonly string[] };
+        contributions: { primaryKey: readonly string[] };
+        mediaAssets: { primaryKey: readonly string[] };
         invitationStates: { primaryKey: readonly string[] };
         transactionalOutbox: { unique: readonly { columns: readonly string[] }[] };
       };
@@ -33,6 +37,18 @@ describe("@neargather/db", () => {
       Object.values(BirthdayFormat)
     );
     expect(schema.enums.rsvpState.values).toEqual(Object.values(RSVPState));
+    expect(schema.tables.events.primaryKey).toEqual(["event_id"]);
+    expect(schema.tables.honorees.primaryKey).toEqual(["event_id", "honoree_id"]);
+    expect(schema.tables.contributions.primaryKey).toEqual([
+      "event_id",
+      "invitation_id",
+      "contribution_id"
+    ]);
+    expect(schema.tables.mediaAssets.primaryKey).toEqual([
+      "event_id",
+      "invitation_id",
+      "asset_id"
+    ]);
     expect(schema.tables.invitationStates.primaryKey).toEqual([
       "event_id",
       "invitation_id"
@@ -65,6 +81,9 @@ describe("@neargather/db", () => {
     expect(migrationSql).toMatch(
       /foreign key \(event_id, invitation_id, organizer_exemption_audit_id\)\s+references neargather\.organizer_exemption_audits \(event_id, invitation_id, audit_id\)/i
     );
+    expect(migrationSql).toMatch(/create table neargather\.honorees/i);
+    expect(migrationSql).toMatch(/create table neargather\.contributions/i);
+    expect(migrationSql).toMatch(/create table neargather\.media_assets/i);
     expect(migrationSql).toMatch(
       /check\s*\(\s*rsvp_state not in \('ATTENDING_INCOMPLETE', 'ATTENDING_COMPLETE'\)\s+or\s+\(\s*qualifying_contribution_id is not null\s+and\s+rsvp_gate_prompt_accepted_at is not null\s*\)\s*\)/i
     );
