@@ -1,0 +1,20 @@
+{
+  "name": "@neargather/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "db:generate": "echo 'Database generation is introduced in Task 3.'",
+    "db:migrate": "echo 'Database migrations are introduced in Task 3.'",
+    "lint": "eslint src --max-warnings=0",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@neargather/contracts": "workspace:*",
+    "@neargather/domain": "workspace:*"
+  }
+}
