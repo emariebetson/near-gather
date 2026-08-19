@@ -1,5 +1,25 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+export {
+  type Clock,
+  type FinalizeUploadResult,
+  type IssueUploadGrantInput,
+  type MediaRecord,
+  type MediaRepository,
+  type MediaStatus,
+  type ObjectStoragePort,
+  type ScannerPort,
+  type StoredObject,
+  type TranscoderPort,
+  type UploadGrant,
+  createInMemoryMediaRepository,
+  createInMemoryObjectStorage,
+  createManualClock,
+  createMediaLifecycleService,
+  createStubScanner,
+  createStubTranscoder
+} from "./media";
+
 const TWILIO_PROVIDER_NAME = "TWILIO" as const;
 const TWILIO_SIGNATURE_HEADER = "x-twilio-signature" as const;
 
