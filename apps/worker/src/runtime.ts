@@ -1,13 +1,21 @@
 export interface WorkerReadinessPayload {
   service: "neargather-worker";
-  status: "ready";
+  status: "ready" | "not_ready";
   version: string;
+  checks: {
+    database: "configured" | "missing";
+  };
 }
 
-export function workerReadinessPayload(version = "0.1.0"): WorkerReadinessPayload {
+export function workerReadinessPayload(
+  env: NodeJS.ProcessEnv = process.env,
+  version = "0.1.0"
+): WorkerReadinessPayload {
+  const database = env.DATABASE_URL ? "configured" : "missing";
   return {
+    checks: { database },
     service: "neargather-worker",
-    status: "ready",
+    status: database === "configured" ? "ready" : "not_ready",
     version
   };
 }

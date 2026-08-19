@@ -17,5 +17,7 @@ describe("web runtime health route", () => {
       body: "Not found",
       statusCode: 404
     });
+
+    expect(routeHealthRequest("/api/ready").statusCode).toBe(503);
   });
 });

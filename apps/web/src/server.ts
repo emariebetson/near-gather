@@ -1,10 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-import { healthPayload } from "./health.js";
+import { healthPayload, readinessPayload } from "./health.js";
 
 export interface HttpRouteResult {
   body: string;
-  statusCode: 200 | 404;
+  statusCode: 200 | 404 | 503;
 }
 
 export function routeHealthRequest(pathname: string): HttpRouteResult {
@@ -12,6 +12,14 @@ export function routeHealthRequest(pathname: string): HttpRouteResult {
     return {
       body: JSON.stringify(healthPayload()),
       statusCode: 200
+    };
+  }
+
+  if (pathname === "/api/ready") {
+    const payload = readinessPayload();
+    return {
+      body: JSON.stringify(payload),
+      statusCode: payload.status === "ready" ? 200 : 503
     };
   }
 
@@ -23,6 +31,8 @@ export function createWebServer() {
     const result = routeHealthRequest(request.url?.split("?", 1)[0] ?? "/");
     response.statusCode = result.statusCode;
     response.setHeader("content-type", "application/json; charset=utf-8");
+    response.setHeader("cache-control", "no-store");
+    response.setHeader("x-content-type-options", "nosniff");
     response.end(result.body);
   });
 }
