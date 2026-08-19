@@ -81,6 +81,15 @@ describe("capability token helpers", () => {
         token: `${token}x`
       })
     ).toBeNull();
+
+    expect(
+      verifyCapabilityToken({
+        now: "2026-08-19T12:00:00.000Z",
+        purpose: CapabilityPurpose.MEDIA_UPLOAD,
+        secret: "super-secret",
+        token: `${token}.extra`
+      })
+    ).toBeNull();
   });
 
   it("exports the canonical 30-event pilot composition for birthdays, including shared and milestone coverage", () => {

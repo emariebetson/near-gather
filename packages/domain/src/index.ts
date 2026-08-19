@@ -68,11 +68,11 @@ export interface InvitationState {
   birthdayFormat?: BirthdayFormat;
   eventId: string;
   eventType: EventType;
-  guardianAuthorityRecord?: GuardianAuthorityRecord;
+  guardianAuthorityRecords: readonly GuardianAuthorityRecord[];
   honorees: readonly Honoree[];
   invitationId: string;
   messagingSuppression?: MessagingSuppression;
-  onBehalfDisclosureReceipt?: OnBehalfDisclosureReceipt;
+  onBehalfDisclosureReceipts: readonly OnBehalfDisclosureReceipt[];
   optOutEvents: readonly OptOutEvent[];
   organizerExemption?: OrganizerExemption;
   policy: EventPolicySnapshot;
@@ -129,14 +129,18 @@ export function buildEventPolicySnapshot(input: {
 export function createInitialInvitationState(
   input: CreateInitialInvitationStateInput
 ): InvitationState {
+  validateInitialInvitationState(input);
+
   return {
     answers: [],
     answersComplete: false,
     eventId: input.eventId,
     eventType: input.eventType,
+    guardianAuthorityRecords: [],
     honorees: input.honorees,
     invitationId: input.invitationId,
     optOutEvents: [],
+    onBehalfDisclosureReceipts: [],
     policy: buildEventPolicySnapshot(input),
     processedIdempotencyKeys: [],
     rsvpState: RSVPState.AWAITING_RESPONSE,
@@ -172,22 +176,30 @@ export function applyCommand(
       };
       break;
     case "on-behalf-disclosure.record":
+      validateMinorHonoreeReference(state, command.receipt.minorHonoreeId);
       nextState = {
         ...state,
-        onBehalfDisclosureReceipt: command.receipt
+        onBehalfDisclosureReceipts: upsertByMinorHonoreeId(
+          state.onBehalfDisclosureReceipts,
+          command.receipt
+        )
       };
       break;
     case "guardian-authority.record":
+      validateMinorHonoreeReference(state, command.receipt.minorHonoreeId);
+      if (command.receipt.guardianAdultActorId !== command.receipt.actor.actorId) {
+        throw new Error("guardianAdultActorId must reference the attesting adult actor.");
+      }
+
       nextState = {
         ...state,
-        guardianAuthorityRecord: command.receipt
+        guardianAuthorityRecords: upsertByMinorHonoreeId(
+          state.guardianAuthorityRecords,
+          command.receipt
+        )
       };
       break;
     case "attendance.record":
-      if (command.response === "NO" && state.qualifyingContribution) {
-        throw new Error("Declining requires no accepted qualifying contribution.");
-      }
-
       nextState = command.gatePromptAccepted
         ? {
             ...state,
@@ -234,12 +246,16 @@ export function applyCommand(
         throw new Error("Only authenticated organizers or cohosts may grant exemptions.");
       }
 
+      if (command.reason.trim().length === 0) {
+        throw new Error("Organizer exemption reason must be non-empty.");
+      }
+
       nextState = {
         ...state,
         organizerExemption: {
           grantedAt: new Date().toISOString(),
           grantedBy: command.actor,
-          reason: command.reason
+          reason: command.reason.trim()
         }
       };
       break;
@@ -266,12 +282,15 @@ export function resolveNextStep(state: InvitationState): NextStep {
 
   if (
     state.policy.guardianAuthorityRequired &&
-    !state.onBehalfDisclosureReceipt
+    !hasCompleteMinorEvidence(state.honorees, state.onBehalfDisclosureReceipts)
   ) {
     return { kind: "COLLECT_ON_BEHALF_DISCLOSURE" };
   }
 
-  if (state.policy.guardianAuthorityRequired && !state.guardianAuthorityRecord) {
+  if (
+    state.policy.guardianAuthorityRequired &&
+    !hasCompleteMinorEvidence(state.honorees, state.guardianAuthorityRecords)
+  ) {
     return { kind: "COLLECT_GUARDIAN_AUTHORITY" };
   }
 
@@ -362,6 +381,19 @@ function finalizeState(
   };
 }
 
+function hasCompleteMinorEvidence<T extends { minorHonoreeId: string }>(
+  honorees: readonly Honoree[],
+  records: readonly T[]
+): boolean {
+  const requiredMinorIds = honorees
+    .filter((honoree) => honoree.ageCategory === "MINOR")
+    .map((honoree) => honoree.honoreeId);
+
+  return requiredMinorIds.every((minorHonoreeId) =>
+    records.some((record) => record.minorHonoreeId === minorHonoreeId)
+  );
+}
+
 function deriveRsvpState(state: InvitationState): RSVPStateValue {
   if (state.attendanceResponse === "NO") {
     return RSVPState.DECLINED;
@@ -413,6 +445,26 @@ function validateEnvelope(state: InvitationState, command: DomainCommand): void 
   }
 }
 
+function validateInitialInvitationState(
+  input: CreateInitialInvitationStateInput
+): void {
+  if (input.eventType === EventType.BIRTHDAY) {
+    if (!input.birthdayFormat) {
+      throw new Error("birthdayFormat is required for BIRTHDAY events.");
+    }
+
+    if (input.honorees.length === 0) {
+      throw new Error("Birthday events require at least one honoree.");
+    }
+
+    return;
+  }
+
+  if (input.birthdayFormat) {
+    throw new Error("birthdayFormat may only be supplied for BIRTHDAY events.");
+  }
+}
+
 function validateActorBoundary(
   honorees: readonly Honoree[],
   actor: CommandActor
@@ -448,4 +500,29 @@ function validateContributionRef(
       "A qualifying contribution must reference the same event and invitation."
     );
   }
+}
+
+function validateMinorHonoreeReference(
+  state: InvitationState,
+  minorHonoreeId: string
+): void {
+  if (
+    !state.honorees.some(
+      (honoree) =>
+        honoree.honoreeId === minorHonoreeId && honoree.ageCategory === "MINOR"
+    )
+  ) {
+    throw new Error("Minor evidence must target a minor honoree from the same event.");
+  }
+}
+
+function upsertByMinorHonoreeId<T extends { minorHonoreeId: string }>(
+  records: readonly T[],
+  nextRecord: T
+): readonly T[] {
+  const remaining = records.filter(
+    (record) => record.minorHonoreeId !== nextRecord.minorHonoreeId
+  );
+
+  return [...remaining, nextRecord];
 }

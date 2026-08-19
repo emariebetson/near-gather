@@ -41,6 +41,12 @@ const minorHonoree: Honoree = {
   milestoneLabel: "Turning 8"
 };
 
+const secondMinorHonoree: Honoree = {
+  ageCategory: "MINOR",
+  displayName: "Nora",
+  honoreeId: "honoree_minor_2"
+};
+
 function createState(honorees: readonly Honoree[] = [adultHonoree]) {
   return createInitialInvitationState({
     birthdayFormat: BirthdayFormat.STANDARD,
@@ -71,14 +77,17 @@ function primeStateForRsvp(honorees: readonly Honoree[] = [adultHonoree]) {
 
   state = applyCommand(state, {
     ...baseCommand("adult-participation.record", "adult-participation"),
-    receipt: {
-      actor: adultActor,
-      channel: "WEB",
-      eventId: "evt_1",
-      invitationId: "inv_1",
-      receiptId: "apr_1",
-      recordedAt: "2026-08-19T00:00:00.000Z",
-      role: "RESPONDENT"
+      receipt: {
+        actor: adultActor,
+        assuranceVersion: "2026-08-19",
+        channel: "WEB",
+        evidence: "age-checkbox",
+        eventId: "evt_1",
+        invitationId: "inv_1",
+        purpose: "RESPONDENT_PARTICIPATION",
+        receiptId: "apr_1",
+        recordedAt: "2026-08-19T00:00:00.000Z",
+        role: "RESPONDENT"
     }
   });
 
@@ -104,8 +113,10 @@ function primeStateForRsvp(honorees: readonly Honoree[] = [adultHonoree]) {
       ...baseCommand("on-behalf-disclosure.record", "on-behalf-disclosure", organizerActor),
       receipt: {
         actor: organizerActor,
+        disclosureVersion: "2026-08-19",
         eventId: "evt_1",
         invitationId: "inv_1",
+        minorHonoreeId: honorees.find((honoree) => honoree.ageCategory === "MINOR")?.honoreeId ?? "honoree_minor",
         receiptId: "obr_1",
         recordedAt: "2026-08-19T00:01:30.000Z",
         scope: "MINOR_HONOREE_PARTICIPATION"
@@ -116,11 +127,15 @@ function primeStateForRsvp(honorees: readonly Honoree[] = [adultHonoree]) {
       ...baseCommand("guardian-authority.record", "guardian-authority", organizerActor),
       receipt: {
         actor: organizerActor,
+        authorityScope: "EVENT_PARTICIPATION",
+        authorityVersion: "2026-08-19",
         childRelationship: "parent",
         disclosureAccepted: true,
         eventId: "evt_1",
+        guardianAdultActorId: organizerActor.actorId,
         invitationId: "inv_1",
-        purpose: "minor honoree participation",
+        minorHonoreeId: honorees.find((honoree) => honoree.ageCategory === "MINOR")?.honoreeId ?? "honoree_minor",
+        noticeVersion: "2026-08-19",
         receiptId: "gar_1",
         recordedAt: "2026-08-19T00:02:00.000Z"
       }
@@ -167,6 +182,41 @@ describe("policy snapshot", () => {
   });
 });
 
+describe("initial invitation state", () => {
+  it("requires a birthday format and at least one honoree for birthday events", () => {
+    expect(() =>
+      createInitialInvitationState({
+        eventId: "evt_1",
+        eventType: EventType.BIRTHDAY,
+        honorees: [adultHonoree],
+        invitationId: "inv_1"
+      })
+    ).toThrow(/birthdayFormat/i);
+
+    expect(() =>
+      createInitialInvitationState({
+        birthdayFormat: BirthdayFormat.STANDARD,
+        eventId: "evt_1",
+        eventType: EventType.BIRTHDAY,
+        honorees: [],
+        invitationId: "inv_1"
+      })
+    ).toThrow(/at least one honoree/i);
+  });
+
+  it("rejects birthday format on non-birthday events", () => {
+    expect(() =>
+      createInitialInvitationState({
+        birthdayFormat: BirthdayFormat.MILESTONE,
+        eventId: "evt_2",
+        eventType: EventType.WEDDING,
+        honorees: [adultHonoree],
+        invitationId: "inv_2"
+      })
+    ).toThrow(/birthdayFormat/i);
+  });
+});
+
 describe("state engine", () => {
   it("rejects a minor honoree acting as an adult actor", () => {
     const state = createState([minorHonoree]);
@@ -184,9 +234,12 @@ describe("state engine", () => {
             ageAttested: true,
             role: "RESPONDENT"
           },
+          assuranceVersion: "2026-08-19",
           channel: "WEB",
+          evidence: "age-checkbox",
           eventId: "evt_1",
           invitationId: "inv_1",
+          purpose: "RESPONDENT_PARTICIPATION",
           receiptId: "apr_minor",
           recordedAt: "2026-08-19T00:00:00.000Z",
           role: "RESPONDENT"
@@ -205,6 +258,79 @@ describe("state engine", () => {
     expect(state.rsvpState).toBe(RSVPState.AWAITING_RESPONSE);
     expect(resolveNextStep(state)).toEqual({
       kind: "REQUEST_QUALIFYING_CONTRIBUTION"
+    });
+  });
+
+  it("requires per-minor disclosure and guardian records before minor-event progress can continue", () => {
+    let state = createState([minorHonoree, secondMinorHonoree]);
+
+    state = applyCommand(state, {
+      ...baseCommand("adult-participation.record", "adult-participation"),
+      receipt: {
+        actor: adultActor,
+        assuranceVersion: "2026-08-19",
+        channel: "WEB",
+        evidence: "age-checkbox",
+        eventId: "evt_1",
+        invitationId: "inv_1",
+        purpose: "RESPONDENT_PARTICIPATION",
+        receiptId: "apr_1",
+        recordedAt: "2026-08-19T00:00:00.000Z",
+        role: "RESPONDENT"
+      }
+    });
+
+    state = applyCommand(state, {
+      ...baseCommand("processing-notice.record", "processing-notice"),
+      receipt: {
+        actor: adultActor,
+        audience: "HOSTS_ONLY",
+        categories: ["attendance"],
+        channel: "WEB",
+        eventId: "evt_1",
+        invitationId: "inv_1",
+        noticeVersion: "2026-08-19",
+        purpose: "EVENT_TRANSACTIONAL",
+        receiptId: "pnr_1",
+        recordedAt: "2026-08-19T00:01:00.000Z",
+        retentionUntil: "2027-08-19T00:00:00.000Z"
+      }
+    });
+
+    state = applyCommand(state, {
+      ...baseCommand("on-behalf-disclosure.record", "one-minor-disclosure", organizerActor),
+      receipt: {
+        actor: organizerActor,
+        disclosureVersion: "2026-08-19",
+        eventId: "evt_1",
+        invitationId: "inv_1",
+        minorHonoreeId: minorHonoree.honoreeId,
+        receiptId: "obr_1",
+        recordedAt: "2026-08-19T00:01:30.000Z",
+        scope: "MINOR_HONOREE_PARTICIPATION"
+      }
+    });
+
+    state = applyCommand(state, {
+      ...baseCommand("guardian-authority.record", "one-minor-authority", organizerActor),
+      receipt: {
+        actor: organizerActor,
+        authorityScope: "EVENT_PARTICIPATION",
+        authorityVersion: "2026-08-19",
+        childRelationship: "parent",
+        disclosureAccepted: true,
+        eventId: "evt_1",
+        guardianAdultActorId: organizerActor.actorId,
+        invitationId: "inv_1",
+        minorHonoreeId: minorHonoree.honoreeId,
+        noticeVersion: "2026-08-19",
+        receiptId: "gar_1",
+        recordedAt: "2026-08-19T00:02:00.000Z"
+      }
+    });
+
+    expect(resolveNextStep(state)).toEqual({
+      kind: "COLLECT_ON_BEHALF_DISCLOSURE"
     });
   });
 
@@ -268,6 +394,38 @@ describe("state engine", () => {
     expect(resolveNextStep(state)).toEqual({ kind: "CONFIRM_ATTENDING" });
   });
 
+  it("allows declining after qualifying into attending while retaining qualifying contribution evidence", () => {
+    let state = applyCommand(primeStateForRsvp(), {
+      ...baseCommand("attendance.record", "attendance-yes"),
+      gatePromptAccepted: true,
+      response: "YES"
+    });
+
+    state = applyCommand(state, {
+      ...baseCommand("qualifying-text.accept", "local-contribution"),
+      contribution: {
+        acceptedAt: "2026-08-19T00:05:00.000Z",
+        contributionId: "contrib_1",
+        eventId: "evt_1",
+        invitationId: "inv_1",
+        kind: "TEXT"
+      }
+    });
+
+    expect(state.rsvpState).toBe(RSVPState.ATTENDING_INCOMPLETE);
+
+    state = applyCommand(state, {
+      ...baseCommand("attendance.record", "attendance-no"),
+      gatePromptAccepted: false,
+      response: "NO"
+    });
+
+    expect(state.rsvpState).toBe(RSVPState.DECLINED);
+    expect(state.qualifyingContribution).toMatchObject({
+      contributionId: "contrib_1"
+    });
+  });
+
   it("treats organizer exemptions as separate audited leaves", () => {
     let state = applyCommand(primeStateForRsvp(), {
       ...baseCommand("organizer-exemption.grant", "grant-exemption", organizerActor),
@@ -285,6 +443,33 @@ describe("state engine", () => {
 
     expect(state.rsvpState).toBe(RSVPState.EXEMPT_COMPLETE);
     expect(resolveNextStep(state)).toEqual({ kind: "CONFIRM_EXEMPT" });
+  });
+
+  it("allows declining after exemption while retaining exemption and contribution history", () => {
+    let state = applyCommand(primeStateForRsvp(), {
+      ...baseCommand("organizer-exemption.grant", "grant-exemption", organizerActor),
+      reason: "Accessibility accommodation"
+    });
+
+    state = applyCommand(state, {
+      ...baseCommand("attendance.record", "decline-after-exempt"),
+      gatePromptAccepted: false,
+      response: "NO"
+    });
+
+    expect(state.rsvpState).toBe(RSVPState.DECLINED);
+    expect(state.organizerExemption).toMatchObject({
+      reason: "Accessibility accommodation"
+    });
+  });
+
+  it("rejects blank organizer exemption reasons", () => {
+    expect(() =>
+      applyCommand(primeStateForRsvp(), {
+        ...baseCommand("organizer-exemption.grant", "blank-exemption", organizerActor),
+        reason: "   "
+      })
+    ).toThrow(/reason/i);
   });
 
   it("allows a decline without contribution and keeps STOP/START/HELP in the messaging lane only", () => {

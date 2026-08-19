@@ -115,9 +115,17 @@ export interface Honoree {
 
 export interface AdultActorAssurance {
   actor: AdultActor;
+  assuranceVersion: string;
   channel: Channel;
+  evidence: string;
   eventId: string;
   invitationId: string;
+  purpose:
+    | "ORGANIZER_PARTICIPATION"
+    | "COHOST_PARTICIPATION"
+    | "RESPONDENT_PARTICIPATION"
+    | "CONTRIBUTOR_PARTICIPATION"
+    | "UPLOADER_PARTICIPATION";
   receiptId: string;
   recordedAt: string;
   role: AdultRole;
@@ -127,11 +135,18 @@ export type AdultParticipationReceipt = AdultActorAssurance;
 
 export interface GuardianAuthorityRecord {
   actor: AdultActor;
+  authorityScope:
+    | "EVENT_PARTICIPATION"
+    | "MEDIA_REMOVAL"
+    | "TAKEDOWN_REQUEST";
+  authorityVersion: string;
   childRelationship?: string;
   disclosureAccepted: boolean;
   eventId: string;
+  guardianAdultActorId: string;
   invitationId: string;
-  purpose: string;
+  minorHonoreeId: string;
+  noticeVersion: string;
   receiptId: string;
   recordedAt: string;
 }
@@ -140,8 +155,10 @@ export type GuardianAuthorityAttestation = GuardianAuthorityRecord;
 
 export interface OnBehalfDisclosureReceipt {
   actor: AdultActor;
+  disclosureVersion: string;
   eventId: string;
   invitationId: string;
+  minorHonoreeId: string;
   receiptId: string;
   recordedAt: string;
   scope:
@@ -368,7 +385,13 @@ export function signCapabilityToken(
 export function verifyCapabilityToken(
   input: VerifyCapabilityTokenInput
 ): CapabilityClaims | null {
-  const [payload, signature] = input.token.split(".");
+  const parts = input.token.split(".");
+
+  if (parts.length !== 2) {
+    return null;
+  }
+
+  const [payload, signature] = parts;
 
   if (!payload || !signature) {
     return null;
