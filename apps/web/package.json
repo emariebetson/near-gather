@@ -1,0 +1,21 @@
+{
+  "name": "@neargather/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "lint": "eslint src --max-warnings=0",
+    "start": "NEARGATHER_START_SERVER=1 node dist/server.js",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@neargather/contracts": "workspace:*",
+    "@neargather/db": "workspace:*",
+    "@neargather/domain": "workspace:*",
+    "@neargather/providers": "workspace:*",
+    "next": "16.2.11",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  }
+}

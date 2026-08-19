@@ -13,3 +13,9 @@ export {
   createManualClock,
   createOutboxConsumer
 } from "./outbox";
+
+export {
+  type WorkerReadinessPayload,
+  startWorkerProcess,
+  workerReadinessPayload
+} from "./runtime";

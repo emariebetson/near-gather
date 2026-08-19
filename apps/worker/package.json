@@ -1,0 +1,18 @@
+{
+  "name": "@neargather/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "lint": "eslint src --max-warnings=0",
+    "start": "NEARGATHER_START_WORKER=1 node dist/runtime.js",
+    "typecheck": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@neargather/contracts": "workspace:*",
+    "@neargather/db": "workspace:*",
+    "@neargather/domain": "workspace:*",
+    "@neargather/providers": "workspace:*"
+  }
+}
