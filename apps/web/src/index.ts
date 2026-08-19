@@ -1,7 +1,8 @@
 import {
   CapabilityPurpose,
+  type AdultActor,
   type DomainCommand,
-  type SystemActor
+  type RecordAttendanceCommand
 } from "@neargather/contracts";
 import type { ProviderInboundMessageRecord } from "@neargather/db";
 import type { InvitationState, NextStep } from "@neargather/domain";
@@ -10,14 +11,16 @@ import type {
   NormalizedTwilioInboundMessage
 } from "@neargather/providers";
 
-const DELIVERY_WORKER_ACTOR: SystemActor = {
-  actorId: "system",
-  kind: "SYSTEM",
-  subsystem: "DELIVERY_WORKER"
-};
-
 const NEUTRAL_SMS_RECOVERY =
   "We couldn't match this message yet. Reply with your invite code or use your invitation link to continue.";
+const HELP_REPLY =
+  "NearGather event messages: reply STOP to opt out or START to resume. Use your invitation link for RSVP details.";
+const START_REPLY =
+  "NearGather messaging has resumed for this event. Use your invitation link any time to continue your RSVP.";
+const STOP_REPLY =
+  "You’ve been opted out of NearGather event messages for this event. Reply START to resume.";
+const MULTI_PERSON_DECLINE_CONFIRMATION_REPLY =
+  "This invite covers more than one person. Reply NO again to confirm declining the whole party, or use your invitation link to update individuals.";
 
 export interface CapabilityAuthorization {
   canReadGuestbook: boolean;
@@ -31,8 +34,11 @@ export interface GuestSmsIdentity {
 }
 
 export interface VerifiedGuestSmsIdentity {
+  actor: AdultActor;
   eventId: string;
+  hasAdultActorAssurance: boolean;
   invitationId: string;
+  partySize: "MULTIPLE" | "SINGLE_CONFIRMED" | "UNKNOWN";
   status: "VERIFIED";
 }
 
@@ -76,9 +82,28 @@ export type HandleInboundSmsMessageResult =
       status: "command_handled";
     }
   | {
+      nextStep: { kind: "COLLECT_ADULT_PARTICIPATION" };
+      providerMessageId: string;
+      semanticIdempotencyKey: string;
+      status: "adult_assurance_required";
+    }
+  | {
       providerMessageId: string;
       semanticIdempotencyKey: string;
       status: "duplicate";
+    }
+  | {
+      effect: "HELP" | "RESTORE_SUPPRESSION" | "SUPPRESS";
+      providerMessageId: string;
+      replyText: string;
+      semanticIdempotencyKey: string;
+      status: "messaging_only";
+    }
+  | {
+      providerMessageId: string;
+      replyText: string;
+      semanticIdempotencyKey: string;
+      status: "confirmation_required";
     }
   | {
       replyText: string;
@@ -159,6 +184,30 @@ export async function handleInboundSmsMessage(
     };
   }
 
+  const messagingOnlyResult = buildMessagingOnlyResult(input.inbound);
+
+  if (messagingOnlyResult) {
+    return messagingOnlyResult;
+  }
+
+  if (!input.identity.hasAdultActorAssurance) {
+    return {
+      nextStep: { kind: "COLLECT_ADULT_PARTICIPATION" },
+      providerMessageId: input.inbound.providerMessageId,
+      semanticIdempotencyKey: input.inbound.semanticIdempotencyKey,
+      status: "adult_assurance_required"
+    };
+  }
+
+  const confirmationResult = buildConfirmationRequiredResult(
+    input.identity,
+    input.inbound
+  );
+
+  if (confirmationResult) {
+    return confirmationResult;
+  }
+
   const command = buildGuestCommand(input.identity, input.inbound);
 
   if (!command) {
@@ -213,13 +262,71 @@ function buildGuestCommand(
   }
 }
 
+function buildMessagingOnlyResult(
+  inbound: HandleInboundSmsMessageInput["inbound"]
+): Extract<HandleInboundSmsMessageResult, { status: "messaging_only" }> | null {
+  if (inbound.classification.kind !== "MESSAGING_KEYWORD") {
+    return null;
+  }
+
+  switch (inbound.classification.keyword) {
+    case "STOP":
+      return {
+        effect: "SUPPRESS",
+        providerMessageId: inbound.providerMessageId,
+        replyText: STOP_REPLY,
+        semanticIdempotencyKey: inbound.semanticIdempotencyKey,
+        status: "messaging_only"
+      };
+    case "HELP":
+      return {
+        effect: "HELP",
+        providerMessageId: inbound.providerMessageId,
+        replyText: HELP_REPLY,
+        semanticIdempotencyKey: inbound.semanticIdempotencyKey,
+        status: "messaging_only"
+      };
+    case "START":
+      return {
+        effect: "RESTORE_SUPPRESSION",
+        providerMessageId: inbound.providerMessageId,
+        replyText: START_REPLY,
+        semanticIdempotencyKey: inbound.semanticIdempotencyKey,
+        status: "messaging_only"
+      };
+  }
+}
+
+function buildConfirmationRequiredResult(
+  identity: VerifiedGuestSmsIdentity,
+  inbound: HandleInboundSmsMessageInput["inbound"]
+): Extract<
+  HandleInboundSmsMessageResult,
+  { status: "confirmation_required" }
+> | null {
+  if (
+    inbound.classification.kind !== "ATTENDANCE" ||
+    inbound.classification.response !== "NO" ||
+    identity.partySize === "SINGLE_CONFIRMED"
+  ) {
+    return null;
+  }
+
+  return {
+    providerMessageId: inbound.providerMessageId,
+    replyText: MULTI_PERSON_DECLINE_CONFIRMATION_REPLY,
+    semanticIdempotencyKey: inbound.semanticIdempotencyKey,
+    status: "confirmation_required"
+  };
+}
+
 function buildAttendanceCommand(
   identity: VerifiedGuestSmsIdentity,
   classification: Extract<InboundSmsClassification, { kind: "ATTENDANCE" }>,
   inbound: HandleInboundSmsMessageInput["inbound"]
-): DomainCommand {
+): RecordAttendanceCommand {
   return {
-    actor: DELIVERY_WORKER_ACTOR,
+    actor: identity.actor,
     channel: "SMS",
     eventId: identity.eventId,
     gatePromptAccepted: false,
@@ -239,7 +346,7 @@ function buildOptOutCommand(
   inbound: HandleInboundSmsMessageInput["inbound"]
 ): DomainCommand {
   return {
-    actor: DELIVERY_WORKER_ACTOR,
+    actor: identity.actor,
     channel: "SMS",
     eventId: identity.eventId,
     idempotencyKey: inbound.semanticIdempotencyKey,

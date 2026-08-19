@@ -16,6 +16,7 @@ interface TwilioWebhookHandler {
       from: string;
       providerMessageId: string;
       rawParameters: Readonly<Record<string, string>>;
+      rawParameterEntries: readonly { key: string; value: string }[];
       receivedAt: string;
       semanticIdempotencyKey: string;
       to: string;
@@ -34,13 +35,28 @@ function signTwilioRequest(
   url: string,
   rawBody: string
 ): string {
-  const params = Array.from(new URLSearchParams(rawBody).entries()).sort(([left], [right]) =>
-    left.localeCompare(right)
-  );
+  const params = rawBody
+    .split("&")
+    .filter((entry) => entry.length > 0)
+    .map((entry) => {
+      const separatorIndex = entry.indexOf("=");
+      const rawKey = separatorIndex >= 0 ? entry.slice(0, separatorIndex) : entry;
+      const rawValue = separatorIndex >= 0 ? entry.slice(separatorIndex + 1) : "";
+
+      return {
+        key: decodeURIComponent(rawKey.replace(/\+/g, " ")),
+        value: decodeURIComponent(rawValue.replace(/\+/g, " "))
+      };
+    })
+    .sort((left, right) =>
+      left.key === right.key
+        ? left.value.localeCompare(right.value)
+        : left.key.localeCompare(right.key)
+    );
 
   const payload = params.reduce(
-    (message, [key, value]) => `${message}${key}${value}`,
-    url
+    (message, { key, value }) => `${message}${key}${value}`,
+    new URL(url).origin + new URL(url).pathname + new URL(url).search
   );
 
   return createHmac("sha1", authToken).update(payload).digest("base64");
@@ -95,6 +111,7 @@ describe("@neargather/providers Twilio inbound adapter", () => {
       from: string;
       providerMessageId: string;
       rawParameters: Readonly<Record<string, string>>;
+      rawParameterEntries: readonly { key: string; value: string }[];
       receivedAt: string;
       semanticIdempotencyKey: string;
       to: string;
@@ -130,6 +147,14 @@ describe("@neargather/providers Twilio inbound adapter", () => {
         To: "+15550002222",
         WaId: "123456"
       },
+      rawParameterEntries: [
+        { key: "MessageSid", value: "SM456" },
+        { key: "From", value: "+15550001111" },
+        { key: "To", value: "+15550002222" },
+        { key: "Body", value: "We will be there" },
+        { key: "ProfileName", value: "Pat" },
+        { key: "WaId", value: "123456" }
+      ],
       receivedAt: "2026-08-19T12:05:00.000Z",
       semanticIdempotencyKey: "twilio:SM456:+15550002222",
       to: "+15550002222"
@@ -177,5 +202,69 @@ describe("@neargather/providers Twilio inbound adapter", () => {
       kind: "ATTENDANCE",
       response: "NO"
     });
+  });
+
+  it("preserves repeated form keys when verifying the signature and exposes duplicate parameter entries", async () => {
+    const handleTwilioInboundWebhook = getHandler();
+    const authToken = "auth-token";
+    const url =
+      "https://neargather.test/api/providers/twilio/inbound?tenant=pilot";
+    const rawBody =
+      "MessageSid=SM789&From=%2B15550001111&To=%2B15550002222&Body=First&MediaUrl0=https%3A%2F%2Fone.test&MediaUrl0=https%3A%2F%2Ftwo.test";
+    const inboundMessages: Array<{
+      rawParameterEntries: readonly { key: string; value: string }[];
+      rawParameters: Readonly<Record<string, string>>;
+    }> = [];
+
+    const result = await handleTwilioInboundWebhook({
+      authToken,
+      onVerifiedInbound: (message) => {
+        inboundMessages.push({
+          rawParameterEntries: message.rawParameterEntries,
+          rawParameters: message.rawParameters
+        });
+      },
+      request: {
+        headers: {
+          "x-twilio-signature": signTwilioRequest(authToken, url, rawBody)
+        },
+        rawBody,
+        receivedAt: "2026-08-19T12:20:00.000Z",
+        url
+      }
+    });
+
+    expect(result).toEqual({ status: "accepted" });
+    expect(inboundMessages[0]?.rawParameters.MediaUrl0).toBe("https://two.test");
+    expect(inboundMessages[0]?.rawParameterEntries).toEqual(
+      expect.arrayContaining([
+        { key: "MediaUrl0", value: "https://one.test" },
+        { key: "MediaUrl0", value: "https://two.test" }
+      ])
+    );
+  });
+
+  it("rejects malformed form bodies safely without invoking the verified handler", async () => {
+    const handleTwilioInboundWebhook = getHandler();
+    const onVerifiedInbound = vi.fn();
+
+    const result = await handleTwilioInboundWebhook({
+      authToken: "auth-token",
+      onVerifiedInbound,
+      request: {
+        headers: {
+          "x-twilio-signature": "irrelevant"
+        },
+        rawBody: "MessageSid=SM999&Body=%E0%A4%A",
+        receivedAt: "2026-08-19T12:30:00.000Z",
+        url: "https://neargather.test/api/providers/twilio/inbound"
+      }
+    });
+
+    expect(result).toEqual({
+      reason: "INVALID_SIGNATURE",
+      status: "rejected"
+    });
+    expect(onVerifiedInbound).not.toHaveBeenCalled();
   });
 });

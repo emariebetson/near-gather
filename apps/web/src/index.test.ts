@@ -1,4 +1,8 @@
-import { CapabilityPurpose, type DomainCommand } from "@neargather/contracts";
+import {
+  CapabilityPurpose,
+  type AdultActor,
+  type DomainCommand
+} from "@neargather/contracts";
 import type { ProviderInboundMessageRecord } from "@neargather/db";
 import { RSVPState } from "@neargather/contracts";
 import type { InvitationState, NextStep } from "@neargather/domain";
@@ -15,8 +19,11 @@ interface HandleInboundSmsMessage {
     }) => Promise<{ state: InvitationState }> | { state: InvitationState };
     identity:
       | {
+          actor: AdultActor;
           eventId: string;
+          hasAdultActorAssurance: boolean;
           invitationId: string;
+          partySize: "MULTIPLE" | "SINGLE_CONFIRMED" | "UNKNOWN";
           status: "VERIFIED";
         }
       | {
@@ -51,6 +58,25 @@ interface HandleInboundSmsMessage {
         providerMessageId: string;
         semanticIdempotencyKey: string;
         status: "duplicate";
+      }
+    | {
+        effect: "HELP" | "RESTORE_SUPPRESSION" | "SUPPRESS";
+        providerMessageId: string;
+        replyText: string;
+        semanticIdempotencyKey: string;
+        status: "messaging_only";
+      }
+    | {
+        nextStep: { kind: "COLLECT_ADULT_PARTICIPATION" };
+        providerMessageId: string;
+        semanticIdempotencyKey: string;
+        status: "adult_assurance_required";
+      }
+    | {
+        providerMessageId: string;
+        replyText: string;
+        semanticIdempotencyKey: string;
+        status: "confirmation_required";
       }
     | {
         replyText: string;
@@ -126,6 +152,12 @@ function createState(): InvitationState {
   };
 }
 
+const verifiedAdultActor: AdultActor = {
+  actorId: "adult_1",
+  ageAttested: true,
+  role: "RESPONDENT"
+};
+
 describe("@neargather/web application services", () => {
   it("deduplicates duplicate webhook keys before executing guest commands", async () => {
     const { handleInboundSmsMessage } = getModule();
@@ -134,8 +166,11 @@ describe("@neargather/web application services", () => {
     const result = await handleInboundSmsMessage({
       executeGuestCommand,
       identity: {
+        actor: verifiedAdultActor,
         eventId: "evt_1",
+        hasAdultActorAssurance: true,
         invitationId: "inv_1",
+        partySize: "SINGLE_CONFIRMED",
         status: "VERIFIED"
       },
       inbound: {
@@ -227,7 +262,145 @@ describe("@neargather/web application services", () => {
     });
   });
 
-  it("dispatches verified inbound guest commands through executeGuestCommand and resolveNextStep", async () => {
+  it("requires explicit confirmation before a multi-person SMS NO can dispatch attendance.record", async () => {
+    const { handleInboundSmsMessage } = getModule();
+    const executeGuestCommand = vi.fn();
+    const resolveNextStep = vi.fn();
+
+    const result = await handleInboundSmsMessage({
+      executeGuestCommand,
+      identity: {
+        actor: verifiedAdultActor,
+        eventId: "evt_1",
+        hasAdultActorAssurance: true,
+        invitationId: "inv_1",
+        partySize: "MULTIPLE",
+        status: "VERIFIED"
+      },
+      inbound: {
+        body: "NO",
+        classification: { kind: "ATTENDANCE", response: "NO" },
+        from: "+15550001111",
+        providerMessageId: "SM_NO",
+        rawParameters: {},
+        receivedAt: "2026-08-19T13:15:00.000Z",
+        semanticIdempotencyKey: "twilio:SM_NO:+15550002222",
+        to: "+15550002222"
+      },
+      recordInboundMessage: () => "RECORDED",
+      resolveNextStep
+    });
+
+    expect(result).toEqual({
+      providerMessageId: "SM_NO",
+      replyText: expect.stringMatching(/reply\s+NO\s+again|confirm/i),
+      semanticIdempotencyKey: "twilio:SM_NO:+15550002222",
+      status: "confirmation_required"
+    });
+    expect(executeGuestCommand).not.toHaveBeenCalled();
+    expect(resolveNextStep).not.toHaveBeenCalled();
+  });
+
+  it("handles STOP, HELP, and START as messaging-only results without continuing RSVP prompts", async () => {
+    const { handleInboundSmsMessage } = getModule();
+
+    async function handleKeyword(keyword: "STOP" | "HELP" | "START") {
+      const executeGuestCommand = vi.fn();
+      const resolveNextStep = vi.fn();
+
+      const result = await handleInboundSmsMessage({
+        executeGuestCommand,
+        identity: {
+          actor: verifiedAdultActor,
+          eventId: "evt_1",
+          hasAdultActorAssurance: false,
+          invitationId: "inv_1",
+          partySize: "SINGLE_CONFIRMED",
+          status: "VERIFIED"
+        },
+        inbound: {
+          body: keyword,
+          classification: { kind: "MESSAGING_KEYWORD", keyword },
+          from: "+15550001111",
+          providerMessageId: `SM_${keyword}`,
+          rawParameters: {},
+          receivedAt: "2026-08-19T13:15:00.000Z",
+          semanticIdempotencyKey: `twilio:SM_${keyword}:+15550002222`,
+          to: "+15550002222"
+        },
+        recordInboundMessage: () => "RECORDED",
+        resolveNextStep
+      });
+
+      expect(executeGuestCommand).not.toHaveBeenCalled();
+      expect(resolveNextStep).not.toHaveBeenCalled();
+
+      return result;
+    }
+
+    await expect(handleKeyword("STOP")).resolves.toEqual({
+      effect: "SUPPRESS",
+      providerMessageId: "SM_STOP",
+      replyText: expect.stringMatching(/stopped|opted out/i),
+      semanticIdempotencyKey: "twilio:SM_STOP:+15550002222",
+      status: "messaging_only"
+    });
+    await expect(handleKeyword("HELP")).resolves.toEqual({
+      effect: "HELP",
+      providerMessageId: "SM_HELP",
+      replyText: expect.stringMatching(/help|stop/i),
+      semanticIdempotencyKey: "twilio:SM_HELP:+15550002222",
+      status: "messaging_only"
+    });
+    await expect(handleKeyword("START")).resolves.toEqual({
+      effect: "RESTORE_SUPPRESSION",
+      providerMessageId: "SM_START",
+      replyText: expect.stringMatching(/resumed|started/i),
+      semanticIdempotencyKey: "twilio:SM_START:+15550002222",
+      status: "messaging_only"
+    });
+  });
+
+  it("requires adult assurance before verified attendance commands can execute", async () => {
+    const { handleInboundSmsMessage } = getModule();
+    const executeGuestCommand = vi.fn();
+    const resolveNextStep = vi.fn();
+
+    const result = await handleInboundSmsMessage({
+      executeGuestCommand,
+      identity: {
+        actor: verifiedAdultActor,
+        eventId: "evt_1",
+        hasAdultActorAssurance: false,
+        invitationId: "inv_1",
+        partySize: "SINGLE_CONFIRMED",
+        status: "VERIFIED"
+      },
+      inbound: {
+        body: "YES",
+        classification: { kind: "ATTENDANCE", response: "YES" },
+        from: "+15550001111",
+        providerMessageId: "SM_YES",
+        rawParameters: {},
+        receivedAt: "2026-08-19T13:20:00.000Z",
+        semanticIdempotencyKey: "twilio:SM_YES:+15550002222",
+        to: "+15550002222"
+      },
+      recordInboundMessage: () => "RECORDED",
+      resolveNextStep
+    });
+
+    expect(result).toEqual({
+      nextStep: { kind: "COLLECT_ADULT_PARTICIPATION" },
+      providerMessageId: "SM_YES",
+      semanticIdempotencyKey: "twilio:SM_YES:+15550002222",
+      status: "adult_assurance_required"
+    });
+    expect(executeGuestCommand).not.toHaveBeenCalled();
+    expect(resolveNextStep).not.toHaveBeenCalled();
+  });
+
+  it("uses the verified adult actor for single-person attendance commands once adult assurance is present", async () => {
     const { handleInboundSmsMessage } = getModule();
     const executeGuestCommand = vi.fn(() => ({ state: createState() }));
     const resolveNextStep = vi.fn(() => ({ kind: "ASK_ATTENDANCE" as const }));
@@ -235,18 +408,21 @@ describe("@neargather/web application services", () => {
     const result = await handleInboundSmsMessage({
       executeGuestCommand,
       identity: {
+        actor: verifiedAdultActor,
         eventId: "evt_1",
+        hasAdultActorAssurance: true,
         invitationId: "inv_1",
+        partySize: "SINGLE_CONFIRMED",
         status: "VERIFIED"
       },
       inbound: {
-        body: "STOP",
-        classification: { kind: "MESSAGING_KEYWORD", keyword: "STOP" },
+        body: "NO",
+        classification: { kind: "ATTENDANCE", response: "NO" },
         from: "+15550001111",
-        providerMessageId: "SM_STOP",
+        providerMessageId: "SM_SINGLE_NO",
         rawParameters: {},
-        receivedAt: "2026-08-19T13:15:00.000Z",
-        semanticIdempotencyKey: "twilio:SM_STOP:+15550002222",
+        receivedAt: "2026-08-19T13:25:00.000Z",
+        semanticIdempotencyKey: "twilio:SM_SINGLE_NO:+15550002222",
         to: "+15550002222"
       },
       recordInboundMessage: () => "RECORDED",
@@ -255,21 +431,22 @@ describe("@neargather/web application services", () => {
 
     expect(executeGuestCommand).toHaveBeenCalledWith({
       command: expect.objectContaining({
+        actor: verifiedAdultActor,
         channel: "SMS",
         eventId: "evt_1",
-        idempotencyKey: "twilio:SM_STOP:+15550002222",
+        idempotencyKey: "twilio:SM_SINGLE_NO:+15550002222",
         invitationId: "inv_1",
-        rawInput: "STOP",
-        type: "opt-out.record"
+        response: "NO",
+        type: "attendance.record"
       }),
-      providerMessageId: "SM_STOP",
-      semanticIdempotencyKey: "twilio:SM_STOP:+15550002222"
+      providerMessageId: "SM_SINGLE_NO",
+      semanticIdempotencyKey: "twilio:SM_SINGLE_NO:+15550002222"
     });
     expect(resolveNextStep).toHaveBeenCalledWith(createState());
     expect(result).toEqual({
       nextStep: { kind: "ASK_ATTENDANCE" },
-      providerMessageId: "SM_STOP",
-      semanticIdempotencyKey: "twilio:SM_STOP:+15550002222",
+      providerMessageId: "SM_SINGLE_NO",
+      semanticIdempotencyKey: "twilio:SM_SINGLE_NO:+15550002222",
       status: "command_handled"
     });
   });

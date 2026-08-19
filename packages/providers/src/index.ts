@@ -31,6 +31,7 @@ export interface NormalizedTwilioInboundMessage {
   from: string;
   providerMessageId: string;
   providerName: typeof TWILIO_PROVIDER_NAME;
+  rawParameterEntries: readonly { key: string; value: string }[];
   rawParameters: Readonly<Record<string, string>>;
   receivedAt: string;
   semanticIdempotencyKey: string;
@@ -52,13 +53,15 @@ export type HandleTwilioInboundWebhookResult =
 export async function handleTwilioInboundWebhook(
   input: HandleTwilioInboundWebhookInput
 ): Promise<HandleTwilioInboundWebhookResult> {
+  const parsedBody = parseTwilioFormBody(input.request.rawBody);
   const signature = input.request.headers[TWILIO_SIGNATURE_HEADER];
 
   if (
+    !parsedBody ||
     !signature ||
     !verifyTwilioWebhookSignature({
       authToken: input.authToken,
-      rawBody: input.request.rawBody,
+      parsedBody,
       signature,
       url: input.request.url
     })
@@ -69,7 +72,7 @@ export async function handleTwilioInboundWebhook(
     };
   }
 
-  const rawParameters = parseTwilioFormBody(input.request.rawBody);
+  const rawParameters = toTwilioParameterRecord(parsedBody);
   const providerMessageId =
     rawParameters.MessageSid ??
     rawParameters.SmsSid ??
@@ -88,6 +91,7 @@ export async function handleTwilioInboundWebhook(
     from,
     providerMessageId,
     providerName: TWILIO_PROVIDER_NAME,
+    rawParameterEntries: parsedBody,
     rawParameters,
     receivedAt: input.request.receivedAt,
     semanticIdempotencyKey: buildTwilioSemanticIdempotencyKey({
@@ -138,13 +142,13 @@ export function buildTwilioSemanticIdempotencyKey(input: {
 
 export function verifyTwilioWebhookSignature(input: {
   authToken: string;
-  rawBody: string;
+  parsedBody: readonly { key: string; value: string }[];
   signature: string;
   url: string;
 }): boolean {
   const expectedSignature = createTwilioWebhookSignature({
     authToken: input.authToken,
-    rawBody: input.rawBody,
+    parsedBody: input.parsedBody,
     url: input.url
   });
 
@@ -153,22 +157,65 @@ export function verifyTwilioWebhookSignature(input: {
 
 function createTwilioWebhookSignature(input: {
   authToken: string;
-  rawBody: string;
+  parsedBody: readonly { key: string; value: string }[];
   url: string;
 }): string {
-  const params = Array.from(new URLSearchParams(input.rawBody).entries()).sort(
-    ([left], [right]) => left.localeCompare(right)
+  const normalizedUrl = normalizeTwilioUrl(input.url);
+  const params = [...input.parsedBody].sort((left, right) =>
+    left.key === right.key
+      ? left.value.localeCompare(right.value)
+      : left.key.localeCompare(right.key)
   );
   const payload = params.reduce(
-    (message, [key, value]) => `${message}${key}${value}`,
-    input.url
+    (message, entry) => `${message}${entry.key}${entry.value}`,
+    normalizedUrl
   );
 
   return createHmac("sha1", input.authToken).update(payload).digest("base64");
 }
 
-function parseTwilioFormBody(rawBody: string): Readonly<Record<string, string>> {
-  return Object.freeze(Object.fromEntries(new URLSearchParams(rawBody).entries()));
+function parseTwilioFormBody(
+  rawBody: string
+): readonly { key: string; value: string }[] | null {
+  try {
+    return Object.freeze(
+      rawBody
+        .split("&")
+        .filter((entry) => entry.length > 0)
+        .map((entry) => {
+          const separatorIndex = entry.indexOf("=");
+          const rawKey = separatorIndex >= 0 ? entry.slice(0, separatorIndex) : entry;
+          const rawValue = separatorIndex >= 0 ? entry.slice(separatorIndex + 1) : "";
+
+          return {
+            key: decodeURIComponent(rawKey.replace(/\+/g, " ")),
+            value: decodeURIComponent(rawValue.replace(/\+/g, " "))
+          };
+        })
+    );
+  } catch {
+    return null;
+  }
+}
+
+function toTwilioParameterRecord(
+  entries: readonly { key: string; value: string }[]
+): Readonly<Record<string, string>> {
+  return Object.freeze(
+    entries.reduce<Record<string, string>>((accumulator, entry) => {
+      accumulator[entry.key] = entry.value;
+      return accumulator;
+    }, {})
+  );
+}
+
+function normalizeTwilioUrl(url: string): string {
+  try {
+    const parsedUrl = new URL(url);
+    return `${parsedUrl.origin}${parsedUrl.pathname}${parsedUrl.search}`;
+  } catch {
+    return url;
+  }
 }
 
 function signaturesMatch(left: string, right: string): boolean {
