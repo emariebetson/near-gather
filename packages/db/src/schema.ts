@@ -466,20 +466,17 @@ export interface InvitationStateHistoryRecord {
   stateVersion: number;
 }
 
-export interface AdultActorAssuranceRecord extends AdultActorAssurance {}
+export type AdultActorAssuranceRecord = AdultActorAssurance;
 
-export interface GuardianAuthorityPersistenceRecord
-  extends GuardianAuthorityRecord {}
+export type GuardianAuthorityPersistenceRecord = GuardianAuthorityRecord;
 
-export interface OnBehalfDisclosurePersistenceRecord
-  extends OnBehalfDisclosureReceipt {}
+export type OnBehalfDisclosurePersistenceRecord = OnBehalfDisclosureReceipt;
 
-export interface ProcessingNoticePersistenceRecord
-  extends ProcessingNoticeReceipt {}
+export type ProcessingNoticePersistenceRecord = ProcessingNoticeReceipt;
 
-export interface ConsentGrantPersistenceRecord extends ConsentGrant {}
+export type ConsentGrantPersistenceRecord = ConsentGrant;
 
-export interface MediaLicensePersistenceRecord extends MediaLicenseReceipt {}
+export type MediaLicensePersistenceRecord = MediaLicenseReceipt;
 
 export interface MessagingSuppressionRecord extends MessagingSuppression {
   suppressionId: string;

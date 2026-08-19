@@ -473,7 +473,7 @@ describe("state engine", () => {
   });
 
   it("allows a decline without contribution and keeps STOP/START/HELP in the messaging lane only", () => {
-    let state = applyCommand(primeStateForRsvp(), {
+    const state = applyCommand(primeStateForRsvp(), {
       ...baseCommand("attendance.record", "decline"),
       gatePromptAccepted: false,
       response: "NO"

@@ -336,10 +336,11 @@ function applyOptOut(
   };
 
   if (keyword === "START") {
-    const { messagingSuppression: _messagingSuppression, ...rest } = state;
+    const nextState = { ...state };
+    delete nextState.messagingSuppression;
 
     return {
-      ...rest,
+      ...nextState,
       optOutEvents: [...state.optOutEvents, nextEvent]
     };
   }
