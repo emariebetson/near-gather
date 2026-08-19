@@ -9,6 +9,7 @@ coverage/
 .DS_Store
 .superpowers/
 .local/
+.worktrees/
 .pglite/
 *.log
 *.tsbuildinfo
