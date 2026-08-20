@@ -60,6 +60,17 @@ export interface ObjectStoragePort {
   headObject(objectKey: string): Promise<StoredObject | null> | StoredObject | null;
 }
 
+export interface PrivateObjectStoragePort extends ObjectStoragePort {
+  createPresignedPut(input: {
+    checksumSha256: string;
+    contentType: string;
+    expiresAt: string;
+    maxBytes: number;
+    objectKey: string;
+  }): Promise<string> | string;
+  deleteObject(objectKey: string): Promise<void> | void;
+}
+
 export interface ScannerPort {
   scan(input: {
     checksumSha256: string;

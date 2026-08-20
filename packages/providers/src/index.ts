@@ -9,6 +9,7 @@ export {
   type MediaRepository,
   type MediaStatus,
   type ObjectStoragePort,
+  type PrivateObjectStoragePort,
   type ScannerPort,
   type StoredObject,
   type TranscoderPort,
@@ -45,6 +46,25 @@ export interface TwilioWebhookRequest {
   rawBody: string;
   receivedAt: string;
   url: string;
+}
+
+/** Provider-neutral outbound boundary. Policy and suppression are decided upstream. */
+export interface TransactionalMessagingPort {
+  send(input: {
+    body: string;
+    destinationE164: string;
+    eventId: string;
+    invitationId: string;
+    initiatedByInboundAt: string;
+    semanticIdempotencyKey: string;
+  }): Promise<{ providerMessageId: string }>;
+}
+
+/** Organizer authentication stays replaceable; guests use signed capabilities instead. */
+export interface OrganizerAuthPort {
+  verifySession(input: {
+    requestHeaders: Readonly<Record<string, string | undefined>>;
+  }): Promise<{ organizerId: string; userId: string } | null>;
 }
 
 export interface NormalizedTwilioInboundMessage {

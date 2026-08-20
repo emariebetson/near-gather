@@ -150,6 +150,50 @@ alter table neargather.accepted_contributions
   add foreign key (event_id, invitation_id, contribution_id)
   references neargather.contributions (event_id, invitation_id, contribution_id);
 
+create function neargather.assert_accepted_contribution()
+returns trigger
+language plpgsql
+as $$
+declare
+  contribution_row record;
+begin
+  select c.*, p.prompt_kind
+    into contribution_row
+    from neargather.contributions c
+    join neargather.prompts p
+      on p.event_id = c.event_id and p.prompt_id = c.prompt_id
+   where c.event_id = new.event_id
+     and c.invitation_id = new.invitation_id
+     and c.contribution_id = new.contribution_id;
+
+  if not found
+     or contribution_row.acceptance_status <> 'ACCEPTED'
+     or contribution_row.accepted_at is null
+     or contribution_row.removed_at is not null
+     or contribution_row.prompt_kind <> 'RSVP_GATE'
+     or contribution_row.contribution_kind <> new.contribution_kind then
+    raise exception 'Only accepted, live RSVP_GATE contributions may qualify an RSVP';
+  end if;
+
+  if contribution_row.contribution_kind <> 'TEXT'
+     and not exists (
+       select 1 from neargather.media_assets m
+        where m.event_id = new.event_id
+          and m.invitation_id = new.invitation_id
+          and m.contribution_id = new.contribution_id
+          and m.processing_status = 'READY'
+     ) then
+    raise exception 'Media contributions require a READY media asset';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger accepted_contribution_invariant
+before insert or update on neargather.accepted_contributions
+for each row execute function neargather.assert_accepted_contribution();
+
 create table neargather.organizer_exemption_audits (
   event_id text not null,
   invitation_id text not null,
@@ -168,6 +212,7 @@ create table neargather.invitation_states (
   birthday_format neargather.birthday_format,
   version integer not null,
   rsvp_state neargather.rsvp_state not null,
+  gate_evidence_status text not null default 'PRESENT' check (gate_evidence_status in ('PRESENT', 'REMOVED_AFTER_ACCEPTANCE')),
   attendance_response text,
   answers_complete boolean not null default false,
   qualifying_contribution_id text,
@@ -938,6 +983,7 @@ export const nearGatherSchema = {
         { name: "birthday_format", nullable: true, type: "neargather.birthday_format" },
         { name: "version", type: "integer" },
         { name: "rsvp_state", type: "neargather.rsvp_state" },
+        { name: "gate_evidence_status", type: "text" },
         { name: "qualifying_contribution_id", nullable: true, type: "text" },
         { name: "organizer_exemption_audit_id", nullable: true, type: "text" },
         { name: "rsvp_gate_prompt_accepted_at", nullable: true, type: "timestamptz" },

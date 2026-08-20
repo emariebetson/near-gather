@@ -8,6 +8,7 @@ import {
   type EventPolicySnapshot,
   EventType,
   type GuardianAuthorityRecord,
+  type GateEvidenceStatus,
   type Honoree,
   type MessagingSuppression,
   type OnBehalfDisclosureReceipt,
@@ -68,6 +69,7 @@ export interface InvitationState {
   birthdayFormat?: BirthdayFormat;
   eventId: string;
   eventType: EventType;
+  gateEvidenceStatus: GateEvidenceStatus;
   guardianAuthorityRecords: readonly GuardianAuthorityRecord[];
   honorees: readonly Honoree[];
   invitationId: string;
@@ -76,6 +78,7 @@ export interface InvitationState {
   optOutEvents: readonly OptOutEvent[];
   organizerExemption?: OrganizerExemption;
   policy: EventPolicySnapshot;
+  rsvpGatePromptId: string;
   processedIdempotencyKeys: readonly string[];
   processingNoticeReceipt?: ProcessingNoticeReceipt;
   qualifyingContribution?: ContributionRef;
@@ -90,6 +93,7 @@ export interface CreateInitialInvitationStateInput {
   eventType: EventType;
   honorees: readonly Honoree[];
   invitationId: string;
+  rsvpGatePromptId: string;
 }
 
 export function buildEventPolicySnapshot(input: {
@@ -136,6 +140,7 @@ export function createInitialInvitationState(
     answersComplete: false,
     eventId: input.eventId,
     eventType: input.eventType,
+    gateEvidenceStatus: "PRESENT",
     guardianAuthorityRecords: [],
     honorees: input.honorees,
     invitationId: input.invitationId,
@@ -143,6 +148,7 @@ export function createInitialInvitationState(
     onBehalfDisclosureReceipts: [],
     policy: buildEventPolicySnapshot(input),
     processedIdempotencyKeys: [],
+    rsvpGatePromptId: input.rsvpGatePromptId,
     rsvpState: RSVPState.AWAITING_RESPONSE,
     version: 0,
     ...(input.birthdayFormat ? { birthdayFormat: input.birthdayFormat } : {})
@@ -200,22 +206,17 @@ export function applyCommand(
       };
       break;
     case "attendance.record":
-      nextState = command.gatePromptAccepted
-        ? {
-            ...state,
-            attendanceResponse: command.response,
-            rsvpGateAcceptedAt: new Date().toISOString()
-          }
-        : {
-            ...state,
-            attendanceResponse: command.response
-          };
+      nextState = {
+        ...state,
+        attendanceResponse: command.response
+      };
       break;
     case "qualifying-text.accept":
       validateContributionRef(state, command.contribution);
       nextState = {
         ...state,
-        qualifyingContribution: command.contribution
+        qualifyingContribution: command.contribution,
+        rsvpGateAcceptedAt: command.contribution.acceptedAt
       };
       break;
     case "media.finalize":
@@ -228,7 +229,8 @@ export function applyCommand(
 
       nextState = {
         ...state,
-        qualifyingContribution: command.contribution
+        qualifyingContribution: command.contribution,
+        rsvpGateAcceptedAt: command.contribution.acceptedAt
       };
       break;
     case "answers.record":
@@ -431,7 +433,7 @@ function validateEnvelope(state: InvitationState, command: DomainCommand): void 
     throw new Error("Expected version does not match the current invitation state.");
   }
 
-  validateActorBoundary(state.honorees, command.actor);
+  validateActorBoundary(state.honorees, command.actor, command.type);
 
   switch (command.type) {
     case "adult-actor-assurance.record":
@@ -439,7 +441,7 @@ function validateEnvelope(state: InvitationState, command: DomainCommand): void 
     case "processing-notice.record":
     case "guardian-authority.record":
     case "on-behalf-disclosure.record":
-      validateActorBoundary(state.honorees, command.receipt.actor);
+      validateActorBoundary(state.honorees, command.receipt.actor, command.type);
       break;
     default:
       break;
@@ -468,9 +470,13 @@ function validateInitialInvitationState(
 
 function validateActorBoundary(
   honorees: readonly Honoree[],
-  actor: CommandActor
+  actor: CommandActor,
+  commandType: DomainCommand["type"]
 ): void {
   if ("kind" in actor) {
+    if (commandType !== "media.finalize") {
+      throw new Error("System actors may only finalize media contributions.");
+    }
     return;
   }
 
@@ -495,11 +501,18 @@ function validateContributionRef(
 ): void {
   if (
     contribution.eventId !== state.eventId ||
-    contribution.invitationId !== state.invitationId
+    contribution.invitationId !== state.invitationId ||
+    contribution.acceptanceStatus !== "ACCEPTED" ||
+    contribution.promptId !== state.rsvpGatePromptId
   ) {
     throw new Error(
       "A qualifying contribution must reference the same event and invitation."
     );
+  }
+
+  if (contribution.kind !== "TEXT" &&
+      (contribution.mediaStatus !== "READY" || !contribution.mediaAssetId)) {
+    throw new Error("Media contributions must reference a READY media asset.");
   }
 }
 

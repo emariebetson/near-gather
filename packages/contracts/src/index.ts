@@ -36,6 +36,8 @@ export const RSVPState = {
 
 export type RSVPState = (typeof RSVPState)[keyof typeof RSVPState];
 
+export type GateEvidenceStatus = "PRESENT" | "REMOVED_AFTER_ACCEPTANCE";
+
 export const CapabilityPurpose = {
   INVITATION_RSVP: "INVITATION_RSVP",
   SMS_JOIN: "SMS_JOIN",
@@ -233,13 +235,22 @@ export interface DataRightsRequest {
   targetId?: string;
 }
 
-export interface ContributionRef {
+interface AcceptedContributionBase {
   acceptedAt: string;
   contributionId: string;
   eventId: string;
   invitationId: string;
-  kind: "TEXT" | "MEDIA";
+  promptId: string;
+  acceptanceStatus: "ACCEPTED";
 }
+
+export type ContributionRef =
+  | (AcceptedContributionBase & { kind: "TEXT" })
+  | (AcceptedContributionBase & {
+      kind: "AUDIO" | "VIDEO" | "PHOTO";
+      mediaAssetId: string;
+      mediaStatus: "READY";
+    });
 
 export interface CommandEnvelopeBase {
   actor: CommandActor;

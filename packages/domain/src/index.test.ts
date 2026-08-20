@@ -6,6 +6,7 @@ import {
   EventType,
   type Honoree,
   type AdultActor,
+  type SystemActor,
   RSVPState
 } from "@neargather/contracts";
 
@@ -53,14 +54,15 @@ function createState(honorees: readonly Honoree[] = [adultHonoree]) {
     eventId: "evt_1",
     eventType: EventType.BIRTHDAY,
     honorees,
-    invitationId: "inv_1"
+    invitationId: "inv_1",
+    rsvpGatePromptId: "prompt_rsvp_gate"
   });
 }
 
 function baseCommand<TType extends DomainCommand["type"]>(
   type: TType,
   idempotencyKey: string,
-  actor: AdultActor = adultActor
+  actor: AdultActor | SystemActor = adultActor
 ) {
   return {
     actor,
@@ -189,7 +191,8 @@ describe("initial invitation state", () => {
         eventId: "evt_1",
         eventType: EventType.BIRTHDAY,
         honorees: [adultHonoree],
-        invitationId: "inv_1"
+        invitationId: "inv_1",
+        rsvpGatePromptId: "prompt_rsvp_gate"
       })
     ).toThrow(/birthdayFormat/i);
 
@@ -199,7 +202,8 @@ describe("initial invitation state", () => {
         eventId: "evt_1",
         eventType: EventType.BIRTHDAY,
         honorees: [],
-        invitationId: "inv_1"
+        invitationId: "inv_1",
+        rsvpGatePromptId: "prompt_rsvp_gate"
       })
     ).toThrow(/at least one honoree/i);
   });
@@ -211,7 +215,8 @@ describe("initial invitation state", () => {
         eventId: "evt_2",
         eventType: EventType.WEDDING,
         honorees: [adultHonoree],
-        invitationId: "inv_2"
+        invitationId: "inv_2",
+        rsvpGatePromptId: "prompt_rsvp_gate"
       })
     ).toThrow(/birthdayFormat/i);
   });
@@ -246,6 +251,21 @@ describe("state engine", () => {
         }
       })
     ).toThrow(/Minor honorees/);
+  });
+
+  it("does not allow the system worker to mutate attendance or answers", () => {
+    const state = createState();
+    expect(() =>
+      applyCommand(state, {
+        ...baseCommand("attendance.record", "system-attendance", {
+          actorId: "system",
+          kind: "SYSTEM",
+          subsystem: "MEDIA_PIPELINE"
+        }),
+        gatePromptAccepted: false,
+        response: "YES"
+      })
+    ).toThrow(/only finalize media/i);
   });
 
   it("keeps a bare YES in awaiting_response until the same invitation has an accepted qualifying contribution", () => {
@@ -357,15 +377,19 @@ describe("state engine", () => {
       response: "YES"
     });
 
+    expect(state.rsvpGateAcceptedAt).toBeUndefined();
+
     expect(() =>
       applyCommand(state, {
         ...baseCommand("qualifying-text.accept", "foreign-contribution"),
         contribution: {
           acceptedAt: "2026-08-19T00:05:00.000Z",
+          acceptanceStatus: "ACCEPTED",
           contributionId: "contrib_foreign",
           eventId: "evt_other",
           invitationId: "inv_1",
-          kind: "TEXT"
+          kind: "TEXT",
+          promptId: "prompt_rsvp_gate"
         }
       })
     ).toThrow(/same event and invitation/i);
@@ -374,10 +398,12 @@ describe("state engine", () => {
       ...baseCommand("qualifying-text.accept", "local-contribution"),
       contribution: {
         acceptedAt: "2026-08-19T00:05:00.000Z",
+        acceptanceStatus: "ACCEPTED",
         contributionId: "contrib_1",
         eventId: "evt_1",
         invitationId: "inv_1",
-        kind: "TEXT"
+        kind: "TEXT",
+        promptId: "prompt_rsvp_gate"
       }
     });
 
@@ -405,10 +431,12 @@ describe("state engine", () => {
       ...baseCommand("qualifying-text.accept", "local-contribution"),
       contribution: {
         acceptedAt: "2026-08-19T00:05:00.000Z",
+        acceptanceStatus: "ACCEPTED",
         contributionId: "contrib_1",
         eventId: "evt_1",
         invitationId: "inv_1",
-        kind: "TEXT"
+        kind: "TEXT",
+        promptId: "prompt_rsvp_gate"
       }
     });
 

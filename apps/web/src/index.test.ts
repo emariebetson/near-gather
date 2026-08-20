@@ -124,6 +124,7 @@ function createState(): InvitationState {
     answersComplete: false,
     eventId: "evt_1",
     eventType: "BIRTHDAY",
+    gateEvidenceStatus: "PRESENT",
     guardianAuthorityRecords: [],
     honorees: [{ ageCategory: "ADULT", displayName: "Alex", honoreeId: "hon_1" }],
     invitationId: "inv_1",
@@ -146,6 +147,7 @@ function createState(): InvitationState {
       removalRequestors: ["DEPICTED_PERSON"],
       takedownWorkflowRequired: true
     },
+    rsvpGatePromptId: "prompt_rsvp_gate",
     processedIdempotencyKeys: [],
     rsvpState: RSVPState.AWAITING_RESPONSE,
     version: 0

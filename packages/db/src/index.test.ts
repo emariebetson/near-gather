@@ -85,6 +85,9 @@ describe("@neargather/db", () => {
     expect(migrationSql).toMatch(/create table neargather\.contributions/i);
     expect(migrationSql).toMatch(/create table neargather\.media_assets/i);
     expect(migrationSql).toMatch(
+      /create function neargather\.assert_accepted_contribution[\s\S]*prompt_kind <> 'RSVP_GATE'[\s\S]*processing_status = 'READY'/i
+    );
+    expect(migrationSql).toMatch(
       /check\s*\(\s*rsvp_state not in \('ATTENDING_INCOMPLETE', 'ATTENDING_COMPLETE'\)\s+or\s+\(\s*qualifying_contribution_id is not null\s+and\s+rsvp_gate_prompt_accepted_at is not null\s*\)\s*\)/i
     );
     expect(migrationSql).toMatch(
