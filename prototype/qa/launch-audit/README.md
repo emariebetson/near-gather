@@ -29,3 +29,7 @@ Screenshots confirm hierarchy, contrast, tap-target sizing, and visible copy onl
 ## Review request
 
 Please review the contribution gate and decline-memory branch on iPhone and Pixel, focusing on: (1) whether “your memory is your yes” is understood, (2) whether the two-minute estimate feels credible, (3) whether the optional decline-memory path is discoverable without weakening NO, and (4) whether the dynamic reveal feels faster than a clickthrough flow.
+
+## Approval record — 2026-08-20
+
+Elizabeth approved the iPhone/Pixel UX direction and accessibility follow-up for implementation. Proceed within Bob’s product scope and Sasha’s frozen canonical contracts. No canonical rule changes are introduced by this approval.
