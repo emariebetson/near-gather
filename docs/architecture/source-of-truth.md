@@ -56,6 +56,8 @@ Only `packages/domain` may decide RSVP transitions, contribution acceptance, que
 - `ATTENDING_*` requires an accepted qualifying contribution; `EXEMPT_*` requires an explicit audited organizer exemption.
 - No pending media asset can qualify an RSVP.
 
+The approved additive Party/PromptRoute/SMS recovery contract and the no-change disposition for `LTR-PHYS-001` are recorded in [contract-delta-party-promptroute-sms.md](contract-delta-party-promptroute-sms.md). Physical fulfillment remains Later.
+
 ## Privacy boundary
 
 The guestbook is an organizer-only projection of accepted, visible contributions. It is structurally incapable of selecting question answers, contacts, messaging consent, or invitation tokens.
