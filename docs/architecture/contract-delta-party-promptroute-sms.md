@@ -1,6 +1,6 @@
 # Architecture contract delta: Party, PromptRoute, EVENT_PROMPT, and SMS recovery
 
-Status: approved additive delta for the P0 digital architecture. This resolves the remaining Raja/Alaska questions without authorizing physical fulfillment or changing the contribution-gated RSVP contract.
+Status: proposed additive delta for `CHG-2026-005`; pending explicit upstream approval. This resolves the remaining Raja/Alaska questions without authorizing physical fulfillment or changing the contribution-gated RSVP contract.
 
 ## 1. LTR-PHYS-001 disposition
 
@@ -108,6 +108,20 @@ Alaska’s separate SMS artifacts are accepted as supporting evidence for:
 
 They are not merged as a competing canonical model. Integration must map them to the Party/Invitation/Prompt/Contribution contracts above and add the persisted SMS-code and uninvited-identity records before launch.
 
+## CHG-2026-005 approval item
+
+Exact change set:
+
+1. Add the event-scoped `Party` aggregate and separate it from revocable `Invitation` access artifacts.
+2. Add submit-only `PromptRoute` records and canonical prompt kinds `REQUIRED_RSVP`, `EVENT_PROMPT`, and `POST_EVENT_CONTROL`; retain `RSVP_GATE` only as a migration compatibility alias.
+3. Add hashed, scoped, expiring, revocable `SmsInvitationCode` persistence for neutral SMS recovery.
+4. Add adult-only `UninvitedEventIdentity` records for event-prompt submissions that have no party, invitation, RSVP, or outbound-messaging authority.
+5. Map Alaska’s SMS ingress, conversation, fallback-upload, and outbox evidence to those records and the existing domain commands.
+
+The change explicitly does **not** alter RSVP states, contribution qualification, adult/minor policy, guestbook authorization, retention, experiment assignment, or provider compliance requirements. It does not authorize printed cards, physical fulfillment, NFC, public galleries, or capsule editions.
+
+Smallest approval needed: approve the five additive records/mappings above as `CHG-2026-005`, with the explicit no-change disposition that `LTR-PHYS-001` remains Later. Approval does not authorize production launch; it authorizes migration design, integration tests, and implementation behind existing feature gates.
+
 ## Review disposition
 
-Approved additive delta: Party, PromptRoute, canonical prompt-kind names, persisted SMS recovery codes, and uninvited event identities. No-change disposition: `LTR-PHYS-001` remains Later. No RSVP state, contribution-gate invariant, minor policy, guestbook authorization, or retention rule is changed.
+Proposed additive delta for `CHG-2026-005`: Party, PromptRoute, canonical prompt-kind names, persisted SMS recovery codes, and uninvited event identities. No-change disposition: `LTR-PHYS-001` remains Later. No RSVP state, contribution-gate invariant, minor policy, guestbook authorization, or retention rule is changed.
