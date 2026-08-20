@@ -1,6 +1,6 @@
 # Architecture contract delta: Party, PromptRoute, EVENT_PROMPT, and SMS recovery
 
-Status: proposed additive delta for `CHG-2026-005`; pending explicit upstream approval. This resolves the remaining Raja/Alaska questions without authorizing physical fulfillment or changing the contribution-gated RSVP contract.
+Status: approved additive delta for `CHG-2026-005` by Elizabeth; authorized engineering truth. This resolves the remaining Raja/Alaska questions without authorizing physical fulfillment or changing the contribution-gated RSVP contract.
 
 ## 1. LTR-PHYS-001 disposition
 
@@ -108,7 +108,9 @@ Alaska’s separate SMS artifacts are accepted as supporting evidence for:
 
 They are not merged as a competing canonical model. Integration must map them to the Party/Invitation/Prompt/Contribution contracts above and add the persisted SMS-code and uninvited-identity records before launch.
 
-## CHG-2026-005 approval item
+## CHG-2026-005 approval record
+
+Approval: Elizabeth approved the exact five-part additive delta. Implementation may proceed for Party/Invitation separation, PromptRoute, canonical prompt kinds, SMS recovery-code persistence, and uninvited-attendee identity handling. Any further semantic change returns to Chat 01 change control.
 
 Exact change set:
 
@@ -120,8 +122,21 @@ Exact change set:
 
 The change explicitly does **not** alter RSVP states, contribution qualification, adult/minor policy, guestbook authorization, retention, experiment assignment, or provider compliance requirements. It does not authorize printed cards, physical fulfillment, NFC, public galleries, or capsule editions.
 
-Smallest approval needed: approve the five additive records/mappings above as `CHG-2026-005`, with the explicit no-change disposition that `LTR-PHYS-001` remains Later. Approval does not authorize production launch; it authorizes migration design, integration tests, and implementation behind existing feature gates.
+Approval scope: the five additive records/mappings above as `CHG-2026-005`, with the explicit no-change disposition that `LTR-PHYS-001` remains Later. This does not authorize production launch; implementation remains behind existing feature gates.
+
+## Required privacy and security evidence
+
+Migration and integration evidence must prove:
+
+- `Party`, `Invitation`, `PromptRoute`, `SmsInvitationCode`, and `UninvitedEventIdentity` are event-scoped; party/invitation relationships cannot cross events.
+- Capability and recovery tokens are stored only as hashes, with expiry, revocation, single-use or idempotency behavior, and no raw-token logging.
+- Minor honorees never become child identities, contacts, accounts, SMS recipients, RSVP respondents, contributors, or uploaders.
+- Imported phone matching never infers consent or messaging permission; SMS remains guest-initiated and suppression-aware.
+- Prompt routes are submit-only, do not grant guestbook read authority, and cannot mutate RSVP or gate status unless they are explicitly invitation-scoped `REQUIRED_RSVP` routes.
+- Unknown, ambiguous, expired, revoked, and replayed codes/routes produce neutral recovery and no state mutation.
+- Audit records capture route/code issuance, resolution, revocation, dedupe, identity outcome, and contribution outcome without raw tokens, child identifiers, or raw phone numbers.
+- Negative authorization, cross-event isolation, replay/idempotency, and deletion/takedown propagation tests are release-gate evidence.
 
 ## Review disposition
 
-Proposed additive delta for `CHG-2026-005`: Party, PromptRoute, canonical prompt-kind names, persisted SMS recovery codes, and uninvited event identities. No-change disposition: `LTR-PHYS-001` remains Later. No RSVP state, contribution-gate invariant, minor policy, guestbook authorization, or retention rule is changed.
+Approved additive delta for `CHG-2026-005`: Party, PromptRoute, canonical prompt-kind names, persisted SMS recovery codes, and uninvited event identities. No-change disposition: `LTR-PHYS-001` remains Later. No RSVP state, contribution-gate invariant, minor policy, guestbook authorization, or retention rule is changed.

@@ -56,7 +56,7 @@ Only `packages/domain` may decide RSVP transitions, contribution acceptance, que
 - `ATTENDING_*` requires an accepted qualifying contribution; `EXEMPT_*` requires an explicit audited organizer exemption.
 - No pending media asset can qualify an RSVP.
 
-The proposed `CHG-2026-005` Party/PromptRoute/SMS recovery delta and the no-change disposition for `LTR-PHYS-001` are recorded in [contract-delta-party-promptroute-sms.md](contract-delta-party-promptroute-sms.md). Physical fulfillment remains Later pending explicit approval.
+The approved `CHG-2026-005` Party/PromptRoute/SMS recovery delta and the no-change disposition for `LTR-PHYS-001` are recorded in [contract-delta-party-promptroute-sms.md](contract-delta-party-promptroute-sms.md). Physical fulfillment remains Later.
 
 ## Privacy boundary
 
